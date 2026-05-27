@@ -2,8 +2,7 @@
 name: atari8bit
 description: >-
   Root router for Atari 8-bit XL/XE AI-agent skills. Load this file first,
-  choose the smallest matching topic file, then open original corpus sources
-  only when deeper verification is needed.
+  then choose the smallest matching topic file from this skill directory.
 ---
 
 # Atari 8-bit Agentic Programming Skills
@@ -15,9 +14,9 @@ Use progressive disclosure:
 
 1. Read this router.
 2. Open exactly one or two topic files that match the task.
-3. If the topic file cites original source paths, open those only for details not already summarized.
+3. Use additional topic files only when the task crosses domains.
 
-All files under `atari8bit/` are English skill material. Source files elsewhere in the repository may be English, Polish, code, PDFs, or original examples.
+This skill is self-contained. The topic files below are the available reference material in this repository.
 
 ## 1. `hardware/` — Silicon Reference
 
@@ -73,20 +72,9 @@ All files under `atari8bit/` are English skill material. Source files elsewhere 
 - **`exotics/vbxe.md`** — VBXE FX core, detection, XDL, blitter, VRAM, palette, MEMAC windows, examples.
 - **`exotics/sophia-rapidus.md`** — Sophia video upgrades, Rapidus/65C816 notes, APE-Time RTC, LDW/CA-2001 device protocol.
 
-## Source Corpus
-
-Primary original sources live outside `atari8bit/`, especially:
-
-- `Altirra-hardware/extracted_chapters/` — authoritative English hardware reference.
-- `atari-documentation/` — memory maps, MADS, POKEY, ANTIC/GTIA, XEX, banking, code examples.
-- Online hardware reference cards such as Gury/Jindroush are useful for connector pinouts and cartridge/PBI signal names; verify register-level behavior against Altirra or local documentation before generating final code.
-- `Atariki/articles/` — Polish articles used selectively for English skill summaries.
-- `articles/scrolling.md` and `articles/ironman.md` — major English tutorial sources.
-- User-provided MADS assembler example corpus, if available — runnable examples for banked 130XE code, relocatable modules, SpartaDOS X/FAS binaries, tracker-player relocators, DLI/IRQ raster kernels, CIO/SIO loaders, and small syntax demonstrations. If the path is not obvious in the workspace, ask the user for it.
-- `torus-project/`, `math/`, `other/` — working algorithm and demo-code references.
-
 ## Navigation Rules
 
 - Hardware-register behavior belongs in `hardware/`; software rendering recipes belong in `graphics/`.
 - OS/device/file/vector questions belong in `system/`; build examples and reverse workflows belong in `tooling/`.
-- Use original Polish sources only as references for translation or verification; do not expose Polish text in final skill answers.
+- Prefer the narrowest topic file that directly matches the request.
+- If a task needs both hardware facts and implementation guidance, load the hardware topic first, then the graphics, audio, system, or tooling topic that covers the code path.
