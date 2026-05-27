@@ -65,7 +65,7 @@ description: >-
 | `$D01A` | —    | COLBK  | $0F | W: background/border colour |
 | `$D01B` | —    | PRIOR  | $0F | W: P/M priority + GTIA mode =9/10/11 |
 | `$D01C` | —    | VDELAY | $0F | W: P/M vertical delay (player/missile sub-scanline offset) |
-| `$D01D` | —    | GRACTL | $0F | W: P/M enable: bits 0=missile, 1=player, 2=dma |
+| `$D01D` | —    | GRACTL | $0F | W: P/M display enable: bit 0=missiles, bit 1=players, bit 2=trigger latch |
 | `$D01E` | —    | HITCLR | $0F | W: write any clears all P/M collision flags |
 | `$D01F` | —    | CONSOL | $00 | R/W: bit 0=Start, bit1=Select, bit2=Option |
 
@@ -381,7 +381,7 @@ P/M graphics use a dedicated memory area selected by `PMBASE`. The data is a ver
 | Missiles | one 256-byte page shared by four 2-bit missiles | Combined through `GRAFM` for direct graphics |
 | Player 0-3 | one 256-byte page each | Shape data also writable through `GRAFP0-GRAFP3` |
 
-Enable DMA through ANTIC `DMACTL/SDMCTL`, then enable GTIA rendering through `GRACTL` bit 1 for missiles and bit 2 for players. Horizontal positions use `HPOSP0-HPOSP3` and `HPOSM0-HPOSM3`; widths use `SIZEP0-SIZEP3` and `SIZEM`.
+Enable DMA through ANTIC `DMACTL/SDMCTL`, then enable GTIA rendering through `GRACTL` bit 0 for missiles and bit 1 for players. Horizontal positions use `HPOSP0-HPOSP3` and `HPOSM0-HPOSM3`; widths use `SIZEP0-SIZEP3` and `SIZEM`.
 
 Priority and overlap are controlled by `PRIOR/GPRIOR`. OR-overlap allows two players on the same scan line to create a combined color where their bit patterns overlap. Use it deliberately within a scan line; do not rely on accidental cross-line overlap.
 

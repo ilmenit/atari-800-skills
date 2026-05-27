@@ -1,7 +1,7 @@
 ---
 name: atari8bit-scroll-detail-ref
 description: >-
-  Detailed Atari 8-bit scrolling patterns supplementary to antic.md — hardware-assisted vertical parallax DLI, GTIA 9++ pixel-half-scroll, MWP minimum-wrapping-principle, VBlank-driven mouse decoder, joystick RORT nibble decoding, and DLI-with-wide-playfield timing gotcha from scrolling.md and ironman.md.
+  Detailed Atari 8-bit scrolling patterns supplementary to antic.md — hardware-assisted vertical parallax DLI, GTIA 9++ pixel-half-scroll, MWP minimum-wrapping-principle, and DLI-with-wide-playfield timing cross-references from scrolling.md and ironman.md.
 ---
 
 # references/scroll-detail — Scrolling Deep Reference
@@ -10,7 +10,7 @@ description: >-
 
 ## Purpose
 
-This file is a tier-3 supplement to antic.md §3.3 and master index §§62–72. Covers patterns not in the main file: hardware-assisted pixel-half scrolling, MWP screen-wrapping scheme, VBlank mouse polling with table-driven nibble decoder, and the `ROR`-based joystick bit-field extractor. Install all four subparts for game-level scrolling depth.
+This file is a tier-3 supplement to antic.md §3.3 and master index §§62–72. Covers patterns not in the main file: hardware-assisted pixel-half scrolling and MWP screen-wrapping schemes. Input decoding, OS VBI return rules, and deep DLI timing are cross-referenced instead of duplicated here.
 
 ---
 
@@ -21,10 +21,9 @@ This file is a tier-3 supplement to antic.md §3.3 and master index §§62–72.
 | HW-assisted parallax scroll (DLI band chain, rate LUTs) | §1.1–§1.3 |
 | Half-step pixel scroll (ANTIC-F soft sprite + char-set flip) | §2 |
 | MWP screen-wrapping (one row/col-buffer, 2 LMS) | §3 |
-| VBlank mouse driver ($D300 nibble read + Amiga/ST tables) | §4 |
-| ROR joystick decoder (STICK0 bit-field → dx/dy) | §5 |
-| DLI wide+VSCROL=0 DLI-timing gotcha | §6 |
-| NVBL deferred VBI RETURN (`SETVBV/XITVBV`) | §7 |
+| Input decoders used by scroll engines | `system/input.md` |
+| DLI wide+VSCROL=0 DLI-timing gotcha | `graphics/display-lists.md` §2.2 |
+| NVBL deferred VBI RETURN (`SETVBV/XITVBV`) | `system/os-vectors-handlers.md` §1 |
 
 ---
 
@@ -155,203 +154,17 @@ Same principle, but with page-per-line layout (256 bytes/line). Only one column 
 
 ---
 
-## §3  VBlank-Driven Mouse Reader
+## §3  Related Engine Inputs and Timing
 
-### §3.1  Register Read
+Scrolling engines often consume input deltas and run from VBI/DLI paths, but those details belong to narrower references:
 
-The Atari mouse (ST-compatible or Amiga-compatible, both read via POT0/1 treated as a 4-bit quadrature encoder) is addressed through `$D300` (or via POT0/1 for the Atari ST mouse — see notes in input.md §6.3).
-
-```asm
-; VBI mouse poll — REQUIRES that $D300 is read every ~2 ms for reliable tracking
-; (VBI is ~16.6 ms — sample on every VBI is sufficient for most application)
-
- vbi_mouse
-        pha
-        txa
-        pha
-        tya
-        pha
-
-        lda $D300              ; read quadrature nibble (bits 0–3 = X, bits 4–7 = Y)
-        pha                    ; saved for table-driven decode
-
-        ; --- decode X-axis from bits 0-3 ---
-        and #$0F
-        tay
-        lda xtable,y
-        cmp #0
-        beq ?no_x
-        clc
-        adc mouse_x_lo         ; signed accumulation (non-linear due to oversample)
-        sta mouse_x_lo
-        lda mouse_x_hi
-        adc #0
-        sta mouse_x_hi
-?no_x
-
-        ; --- decode Y-axis from bits 4-7 ---
-        pla
-        and #$F0
-        lsr a
-        lsr a
-        lsr a
-        lsr a                   ; shift right nibble to low
-        tay
-        lda ytable,y
-        cmp #0
-        beq ?no_y
-        clc
-        adc mouse_y_lo
-        sta mouse_y_lo
-        lda mouse_y_hi
-        adc #0
-        sta mouse_y_hi
-?no_y
-
-        pla
-        tay
-        pla
-        tax
-        pla
-        rti
-```
-
-**Table-driven nibble decoding (Amiga compat, from ironman.md):**
-
-```asm
-xtable  .byte  0, -1,  1,  0   ; $0=$f
-        .byte  1,  0,  0, -1   ; $4=$7
-ytable  .byte  0,  1, -1,  0   ; $0=$f
-        .byte  1,  0,  0, -1   ; $4=$7
-```
-
-**Table-driven nibble decoding (Atari ST compat):**
-
-```asm
-xtable  .byte  0,  1,  0, -1   ; $0=$f
-        .byte  0, -1,  1,  0   ; $4=$7
-ytable  .byte  0,  0, -1,  1   ; $0=$f
-        .byte  0,  1, -1,  0   ; $4=$7
-```
-
-> **Caveat:** No emulator currently supports the MT mouse hybrid; this only works on real hardware. On $D300, VBI-rate sampling (every 16 ms) causes visible lag in fast/swift motion. For game-quality response, use a timer 1 IRQ at ~1 kHz for quadrature sampling, and accumulate deltas each frame.
+- Joystick and mouse decode: `system/input.md`
+- Deferred VBI install/return: `system/os-vectors-handlers.md`
+- DLI timing edge cases for wide playfields, HSCROL, and VSCROL: `graphics/display-lists.md`
 
 ---
 
-## §4  ROR-Based Joystick Bit-Field Decoder
-
-`STICK0` (shadow `$278`) encodes 4-direction in bits 0–3 as a 4-bit Gray-coded field:
-
-```
- STICK0 bit 0 = UP
- STICK0 bit 1 = DOWN
- STICK0 bit 2 = LEFT
- STICK0 bit 3 = RIGHT
-```
-
-A single `ROR A` shifts the low-order bit into the Carry flag — test each axis pair sequentially:
-
-```asm
-record_joystick_vbi
-        lda STICK0            ; $D278 (shadow)
-        cmp #$0F
-        bcs ?none             ; $0F = centered (all bits high = open-collector grounded)
-        sta latest_joystick
-
-?none   lda STRIG0            ; $D284 — trigger button
-        bne ?done
-        lda #1
-        sta delay_count        ; ludicrous speed!
-?done   rts
-
-record_joystick_vbi        ; also polled in VBI/VBI-driver
-process_joystick
-        lda #0
-        sta joystick_x
-        sta joystick_y
-
-        lda latest_joystick
-        ror a                  ; bit 0 = UP → goes to Carry
-        bcs ?up_clear          ; carry clear = pressed → skip
-        dec joystick_y        ; UP = decrement (wraps to $FF)
-?up_clear
-        ror a                  ; bit 1 = DOWN → Carry
-        bcs ?down_clear
-        inc joystick_y        ; DOWN = increment
-?down_clear
-        ror a                  ; bit 2 = LEFT → Carry
-        bcs ?left_clear
-        dec joystick_x        ; LEFT = $FF
-?left_clear
-        ror a                  ; bit 3 = RIGHT → Carry
-        bcs ?next
-        inc joystick_x        ; RIGHT = $01 — NOTE ROR (LSR) confirm bit ordering
-?next   lda #0
-        sta latest_joystick
-
-        rts
-```
-
-> **Note on encoding direction:** Some CX85-trackball/430S hardware uses bit=high for pressed. If arrows seem inverted, swap the BNE/BEQ branching. The `STICK0` returned from the register itself is **high=off / low=on** (active-low from open-collector), so is `LDA STICK0; CMP #$0F` (not CMP #$00) tests the centered 2-state.
-
----
-
-## §5  DLI Wide Playfield + HSCROL + VSCROL=0 — Timing Gotcha
-
-From scrolling.md §JVB-VSCROL-0: When using a DLI on the last scrolled line AND HSCROL is wide AND VSCROL=0, ANTIC has only ~10 CPU cycles on the first scan line of a Mode 4 + wide + HSCROL line. This is because: (a) wide playfield gives 48 bytes/line (+8 DMA steal), (b) HSCROL adds another +8 byte DMA window (4 left + 4 right buffer), (c) Mode 4's first scan line steals font-generation cycles — Net = <10 cycles for any authored DLI body.
-
-### Mitigation options
-
-| Option | Cost | Use case |
-|---|---|---|
-| VSCROL ≥ 1 | Gives ≥ 2 scan lines on the DLI line | Works with any DLI body; the simplest fix |
-| Normal-width playfield (DMACTL $22) | Remove 8-cycle wide DMA steal | Status-line DLI still works; scrolling playfield loses 8 color clocks |
-| Page-aligned DLI on next scan line | DLI fires on scan line 2, not line 1 | Sufficient cycles line 2 |
-
-**Recommended approach for game engine:** In VBI, ensure VSCROL is always ≥ 1 before leaving; reset to 0 *only during the VBI* right after writing HSCROL/VSCROL for the next frame.
-
-```asm
-vbi_end
-        lda vert_scroll        ; check we worked around this
-        ora horz_scroll        ; if BOTH are non-zero fine
-        bne ?ok
-        lda #$01               ; VSCROL floor = 1
-        sta VSCROL
-?ok     jmp XITVBV
-```
-
----
-
-## §6  NVBLNV — SETVBV / XITVBV Deferred VBI  
-
-(scrolling.md §NVBL deferred VBI return)
-
-The OS provides two entry points for the deferred vertical blank interrupt: `SETVBV` installs it (X=high-byte of handler, Y=low-byte), `XITVBV` exits via the OS path, which restores A/X/Y and performs the CHKHCLK/VDSLST setup for the next VBI.
-
-```asm
-init_deferred_vbi
-        ldx #>my_vbi
-        ldy #<my_vbi
-        lda #$07               ; defer flag + VBI enabled
-        jsr SETVBV             ; $E45C on XL/OS-A
-
-my_vbi
-        pha
-        txa
-        pha
-        tya
-        pha
-
-        ; [... do work ...]
-
-        jmp XITVBV             ; $E462 — correct deferred VBI return path
-```
-
-**Why not `RTI`:** `XITVBV` hands the accumulator restore to the OS VBI chain so the deferred mechanism keeps running across VBI boundaries. `RTI` from a VBI executes at cycle 0 of the visible area, before the OS can set up the NMI return chains.
-
----
-
-## §7  MWP One-Row/Single-Column Blit Pattern (Full Code)
+## §4  MWP One-Row/Single-Column Blit Pattern (Full Code)
 
 ```asm
 ; mode 4 per-row blit + DLIST pair  — update BLIT after each scroll step
@@ -372,4 +185,4 @@ mwp_scroll_step_v
 
 ---
 
-*This file is references/scroll-detail.md — tier-3 supplement for antic.md §3.3 and master index §§62–72. MWP, half-step scroll, VBlank mouse, joystick ROR decode, and DLI wide+VSCROL=0 timing gotcha are not in the main file but originate from ironman.md and scrolling.md.*
+*This file is references/scroll-detail.md — tier-3 supplement for antic.md §3.3 and master index §§62–72. MWP and half-step scroll details remain here; input, OS VBI, and DLI timing details are linked to their narrower reference files.*

@@ -26,6 +26,58 @@ Graphics 8 (ANTIC E) uses scan-line sequential addressing. The screen width is 4
 screen_addr = screen_base + (L × 40)
 ```
 
+For game code, precompute line-address tables instead of multiplying by 40 during drawing:
+
+```asm
+line_lo  .byte <(screen+0*40), <(screen+1*40), <(screen+2*40)
+line_hi  .byte >(screen+0*40), >(screen+1*40), >(screen+2*40)
+
+screen_ptr_for_y
+        ldy   y_pos
+        lda   line_lo,y
+        sta   screen_ptr
+        lda   line_hi,y
+        sta   screen_ptr+1
+        rts
+```
+
+## Bitmap Plotting Primitives
+
+For 2-bit-pixel modes, four pixels share one byte. Split X into byte offset and pixel-in-byte:
+
+```asm
+; byte_x = x / 4, pixel = x & 3
+        lda   x_pos
+        lsr   a
+        lsr   a
+        tay
+
+        lda   x_pos
+        and   #3
+        tax
+```
+
+Use masks for partial-byte writes at the left and right edges of spans:
+
+```asm
+left_mask
+        .byte %00000000, %11000000, %11110000, %11111100
+right_mask
+        .byte %00111111, %00001111, %00000011, %00000000
+pixel_mask
+        .byte %00111111, %11001111, %11110011, %11111100
+
+; color2 contains the 2-bit color replicated into the selected pixel position.
+put_pixel_2bpp
+        lda   (screen_ptr),y
+        and   pixel_mask,x
+        ora   color2,x
+        sta   (screen_ptr),y
+        rts
+```
+
+Horizontal lines are fastest when the middle bytes are full-byte fills and only the edge bytes are masked. If both endpoints land in the same byte, combine both edge masks before writing.
+
 For extended RAM or cold-start video, initialise the display before the first frame is fetched. The 240-line cold-start sequence must disable screen DMA, install the display list without JVB, point DLI at the line-247 shutdown, set deferred VBI at `$0222`, then re-enable DMA only in the deferred slot after VBLANK has established. The full initialisation is:
 
 ```

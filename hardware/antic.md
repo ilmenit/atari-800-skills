@@ -323,7 +323,7 @@ See §3.3.6 for the fine-scroll / 2D-scroll code pattern. Summary: VBI pre-reads
 | E | 1 | 160 | 4 KB | 4 KB | 4 | 1×1 |
 | F | 1 | 320 | 8 KB | — | 2 hires | 1×1 (PF2 luminance) |
 
-Key: **Lines/cell** = scan lines per character row. **Aligned** = address must be 512B/1K-aligned for char modes; bitmap modes require every-row LSM (`$40`+LMS on every scan-line instruction) for playfield widths >4K. `+1` color in modes 4/5 = background color. Mode F background = PF2 colour; **P/M are available in all standard modes only if DMACTL bit 3 = 0 (both PMG and P/M either-on at resolution)**. (`Wide-non` variant: if PMG is forced, the playfield scans and **only the odd-side** of the PMG cavity is background).
+Key: **Lines/cell** = scan lines per character row. **Aligned** = address must be 512B/1K-aligned for char modes; bitmap modes require every-row LMS (`$40`+LMS on every scan-line instruction) for playfield widths >4K. `+1` color in modes 4/5 = background color. Mode F background = PF2 colour. Hardware P/M graphics are available over standard playfield modes when `DMACTL` missile/player DMA and `GRACTL` display bits are enabled; PMG DMA steals cycles but does not change the playfield mode.
 
 **Dynamic CHBASE switching:** write to `CHBASE = $D409`; takes effect two cycles after write. For Mode 6/7, use CHBASE bits 0 used as mode-selection: CHBASE bit 1 must match the mode's alignment boundary for correct color-clock pipeline.
 
@@ -346,7 +346,7 @@ All registers are at `$D4xx`; only low 4 address bits decoded → 16 mirrored co
 
 | Register | Address | R/W | Description |
 |---|---|---|---|
-| DMACTL | `$D400` | W | DMA control: bits 0–1 = width (0=off/1=narrow/2=normal/3=wide); bit 3=PMG; bit 4=hscroll; bit 5=display-list DMA |
+| DMACTL | `$D400` | W | DMA control: bits 0–1 = width (0=off/1=narrow/2=normal/3=wide); bit 2=missile DMA; bit 3=player DMA; bit 4=single-line PMG; bit 5=playfield/display-list DMA |
 | CHACTL | `$D401` | W | Character mode control: bits 0=blink, 1=inversion, 2=vertical reflect |
 | HSCROL | `$D404` | W | Horizontal fine scroll 0–15 |
 | VSCROL | `$D405` | W | Vertical fine scroll 0–15 |

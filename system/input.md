@@ -17,8 +17,10 @@ description: >-
 | DB9 pinout and model port mapping | §6.0 |
 | STICK OS shadows vs PIA hardware | §6.1 |
 | TRIG per-trigger read | §6.1 |
+| ROR joystick bit-field decoder | §6.1 |
 | PADDLn RC-time; wait \u2265256c | §6.1 |
 | Mouse delta via PADDLn (EOR#FF+ADC trick) | §6.1 |
+| Quadrature mouse nibble decoder | §6.1 |
 | Light pen (PENH/PENV valid range) | §6.2 |
 | CONSOL start/select/option + clear-to-write | §6.2 |
 | XEP80 / Touch tablet | §6.2 |
@@ -103,6 +105,59 @@ stick_map
         and #$0f        ; joystick 0 active-low direction nibble
 ```
 
+### ROR joystick bit-field decoder
+
+`STICK0` (`$0278`) is an active-low bit field, not a Gray code. A cleared bit means the direction is pressed:
+
+```
+bit 0 = UP     bit 1 = DOWN
+bit 2 = LEFT   bit 3 = RIGHT
+```
+
+Using `ROR A` moves each direction bit into Carry, so a compact decoder can consume the four directions in order:
+
+```asm
+record_joystick
+        lda   STICK0          ; $0278 OS shadow
+        and   #$0f
+        cmp   #$0f            ; centered: all direction bits high
+        beq   ?none
+        sta   latest_joystick
+?none   lda   STRIG0          ; $0284 OS trigger shadow, 0 = pressed
+        bne   ?done
+        lda   #1
+        sta   fire_pressed
+?done   rts
+
+process_joystick
+        lda   #0
+        sta   joystick_x
+        sta   joystick_y
+
+        lda   latest_joystick
+        ror   a               ; bit 0 -> Carry
+        bcs   ?up_clear
+        dec   joystick_y
+?up_clear
+        ror   a               ; bit 1 -> Carry
+        bcs   ?down_clear
+        inc   joystick_y
+?down_clear
+        ror   a               ; bit 2 -> Carry
+        bcs   ?left_clear
+        dec   joystick_x
+?left_clear
+        ror   a               ; bit 3 -> Carry
+        bcs   ?right_clear
+        inc   joystick_x
+?right_clear
+        lda   #0
+        sta   latest_joystick
+        rts
+```
+
+For two-button joystick adapters that encode a second fire button through paddle timing, sample at the start of VBI: read `POT0`/`ALLPOT`, then write `POTGO` only after the read because `POTGO` resets the POT counters.
+
 ### Paddle reading (POT timing)
 
 POT is an RC-integrator. Writing `POTGO ($D20B)` discharges the capacitors and starts a new measurement; read `POT0-POT7` only after enough time has passed. In fast scan, wait at least 229 CPU cycles; in normal scan, wait roughly 229 scan lines or use the OS `PADDLn` shadows.
@@ -131,6 +186,69 @@ XEP80 / Touch tablet (X-Modern): implemented via SIO device or through joystick-
 - Atari Touch Tablet uses the analog paddle inputs: X on pin 9, Y on pin 5, button on pin 1 or trigger depending on mode.
 - CX-22 trackball and ST/Amiga mice use quadrature-like direction/reference lines on the digital pins. Treat them as edge/delta devices, not as absolute joystick states.
 - Light gun trigger is on the trigger pin. Hardware notes describe reliable use on the fourth 400/800 port; XL/XE compatibility should be stated explicitly if required.
+
+For ST/Amiga-style mouse readers, poll the joystick-port direction nibble and table-decode signed deltas. VBI-rate polling is usable for UI cursors; fast game movement should use a POKEY timer IRQ around 1 kHz and accumulate deltas for the frame.
+
+```asm
+vbi_mouse
+        pha
+        txa
+        pha
+        tya
+        pha
+
+        lda   PORTA           ; $D300, joystick-port direction lines
+        pha
+
+        and   #$0f
+        tay
+        lda   xtable,y
+        clc
+        adc   mouse_x_lo
+        sta   mouse_x_lo
+        lda   mouse_x_hi
+        adc   #0
+        sta   mouse_x_hi
+
+        pla
+        lsr   a
+        lsr   a
+        lsr   a
+        lsr   a
+        tay
+        lda   ytable,y
+        clc
+        adc   mouse_y_lo
+        sta   mouse_y_lo
+        lda   mouse_y_hi
+        adc   #0
+        sta   mouse_y_hi
+
+        pla
+        tay
+        pla
+        tax
+        pla
+        rts
+```
+
+Amiga-compatible delta tables:
+
+```asm
+xtable  .byte  0, -1,  1,  0,  1,  0,  0, -1
+        .byte -1,  0,  0,  1,  0,  1, -1,  0
+ytable  .byte  0,  1, -1,  0,  1,  0,  0, -1
+        .byte -1,  0,  0,  1,  0, -1,  1,  0
+```
+
+ST-compatible delta tables:
+
+```asm
+xtable  .byte  0,  1,  0, -1,  0, -1,  1,  0
+        .byte  0,  1, -1,  0,  1,  0,  0, -1
+ytable  .byte  0,  0, -1,  1,  0,  1, -1,  0
+        .byte  0, -1,  1,  0, -1,  0,  0,  1
+```
 
 ---
 

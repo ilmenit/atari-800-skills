@@ -41,7 +41,8 @@ This skill is self-contained. The topic files below are the available reference 
 - **`graphics/display-lists.md`** — DLI routines, display-list instruction set, LMS/JVB, WSYNC, multi-zone DLI patterns.
 - **`graphics/character-modes.md`** — ANTIC text modes, fonts, CHBASE/CHACTL, blink/inversion, character-mode plotting.
 - **`graphics/bitmap-modes.md`** — Hires and multicolor bitmap modes, 240-line tricks, custom video modes.
-- **`graphics/pm-graphics.md`** — Player/missile setup, multiplexing, collision detection, soft sprites, OR-overlap patterns.
+- **`graphics/pm-graphics.md`** — Hardware player/missile setup, movement, multiplexing, priority, and collision detection.
+- **`graphics/software-sprites.md`** — CPU-rendered bitmap/character software sprites, save/restore, XOR, pre-shift tables, dirty buffers, collision tests.
 - **`graphics/scrolling.md`** — Coarse/fine vertical and horizontal scroll, VSCROL/HSCROL, parallax, MWP buffering.
 - **`graphics/advanced-fx.md`** — HIP, RIP, TIP, GTIA 9++, interlaced shade/color techniques.
 

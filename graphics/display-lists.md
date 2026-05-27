@@ -21,6 +21,7 @@ This file is a tier-3 deep-dive supplement to antic.md (§§3.6/3.8/3.10). When 
 | Mandatory PHA/TXA/PHY/PLA/RTI boilerplate | §1 |
 | Shadow vs hardware register table (PRIOR/COLPFn) | §2 |
 | VSCROL deadline table (cycle 0/108/5) | §2.1 |
+| Wide playfield + HSCROL + VSCROL=0 timing gotcha | §2.2 |
 | JVB DLI storm — stack depth limit | §3 |
 | Rainbow / colour-march on blank-line ROR | §4.4 |
 | HW vertical parallax DLI band chain | §4.1 |
@@ -135,6 +136,34 @@ The the reference manual §4.7 states three VSCROL write deadline windows:
 | GTIA 9/10/11 MUST use even HSCROL | GTIA pairs adjacent color-clock bytes into 4-bit pixels; odd shifts corrupt the pairing |
 | Mid-line LSB write propagates immediately | writing HSCROL mid-scan line affects the left-visible edge without flicker; bits 1–3 change DMA fetch start/stop windows |
 | Crossing DLI-trigger during write | if bit 1–3 change crosses the boundary where ANTIC must stop/start DMA, playfield corruption results — do HSCROL write only at HBLANK (WSYNC) |
+
+## §2.2  Wide Playfield + HSCROL + VSCROL=0 Timing Gotcha
+
+On the first scan line of a Mode 4 line with wide playfield and horizontal scroll enabled, ANTIC can leave roughly 10 CPU cycles before playfield DMA starts. A DLI placed on the last scrolled line with `VSCROL=0` can therefore be too late for useful work.
+
+Main causes:
+
+- Wide playfield fetches 48 bytes per line.
+- Horizontal scroll adds the extra left/right scroll buffer fetch.
+- Mode 4's first scan line also pays character/font fetch cost.
+
+Mitigations:
+
+| Option | Effect |
+|---|---|
+| Keep `VSCROL >= 1` on the DLI boundary | Gives the DLI a later scan-line window |
+| Use normal-width playfield for the split | Removes wide-playfield DMA steal |
+| Move the DLI target one scan line later | Avoids the first-line fetch burst |
+
+```asm
+vbi_end
+        lda   vert_scroll
+        ora   horz_scroll
+        bne   ?ok
+        lda   #1
+        sta   VSCROL          ; floor avoids the VSCROL=0 first-line trap
+?ok     jmp   XITVBV
+```
 
 ---
 

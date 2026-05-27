@@ -1,127 +1,183 @@
 # Player/Missile Graphics
 
-## Memory Layout
+> **Scope:** Atari hardware players and missiles, PMG memory, GTIA registers, priority, size, movement, and collisions.
+> **Do not use for:** CPU-rendered software sprites; use `graphics/software-sprites.md`.
 
-PMG memory occupies a dedicated region separate from the screen picture memory. PMBASE → base pointer. The OS variable `PMBASE` at `$0224` controls location. Total PMG memory for one player / four missiles in standard resolution is 128 bytes per player — 2 K total for all five objects on one‑resolution. When PMG memory is double‑resolution enabled, size doubles.
+## Quick-Lookup
 
-The PMG buffer in memory is structured as:
+| Need | See |
+|---|---|
+| PMG memory layout | §1 |
+| Enable sequence | §2 |
+| Move players/missiles | §3 |
+| Colors, sizes, priority | §4 |
+| Collision registers | §5 |
+| DLI multiplexing | §6 |
 
-```
-offset $000    player 0, scan row 0
-offset $001    player 0, scan row 1
-...
-offset $07F    player 0, scan row 127  (complete vertical extent)
+## §1 PMG Memory Layout
 
-offset $080    player 1, scan row 0
-...
-offset $0FF    player 1, scan row 127
+PMG data is fetched by ANTIC DMA from the base selected by `PMBASE ($D407)`. The value written to `PMBASE` is the high byte of the PMG area.
 
-offset $100    missile 0, scan row 0
-...
-offset $13F    missile 0, scan row 127
-```
+Resolution is selected by `DMACTL`:
 
-The horizontal position bytes — HPOSP0–HPOSP3 and HPOSM0–HPOSM3 (`$D000–$D00A`) — specify the horizontal start position only. The bit pattern for each line of PMG memory is a 1‑bit plane overlay with priority gate: missile bits inhibit player bits at the same horizontal position.
+| Mode | DMACTL bit 4 | Alignment | Bytes per player | Notes |
+|---|---:|---:|---:|---|
+| Double-line | 0 | 1 KB practical minimum | 128 | One PMG byte covers two scan lines |
+| Single-line | 1 | 2 KB practical minimum | 256 | One PMG byte covers one scan line |
 
-## GRACTL — PMG Enable and Double‑Resolution
+Common offsets from the PMG base:
 
-`GRACTL` at `$D01D` holds the enable bits and the double‑resolution flag.
+| Object | Double-line offset | Single-line offset |
+|---|---:|---:|
+| Missiles | `$0300` | `$0300` |
+| Player 0 | `$0400` | `$0400` |
+| Player 1 | `$0500` | `$0500` |
+| Player 2 | `$0600` | `$0600` |
+| Player 3 | `$0700` | `$0700` |
 
-| Bit | Meaning |
-|-----|---------|
-| 0 | Player 0 enable |
-| 1 | Player 1 enable |
-| 2 | Missile enable (four missiles) |
-| 3 | DMA for PMG data fetch |
-| 4 | Double‑resolution mode (2× vertical resolution) |
-| 5 | … (reserved; retained for compatibility) |
-| 6 | … |
-| 7 | Sophia register bank switch (see §9) |
+Single-line mode uses twice as many bytes vertically, so reserve a 2 KB aligned region even though the offsets look the same.
 
-Set only the bits needed: players consume 256 bytes each, missiles consume 128 bytes; on a system with only 48 KB usable, disabling all PMG saves 1.5 KB of contiguous RAM.
+## §2 Enable Sequence
 
-Write `GRACTL` with bits 0–3 for players and bits 4–5 for missiles as follows:
+Two chips participate:
 
-```
-LDA #$0F          ; players 0+1 enabled, missiles enabled, single‑res
-STA GRACTL
+- `DMACTL ($D400)` enables ANTIC fetching of missile/player data.
+- `GRACTL ($D01D)` enables GTIA display of fetched missile/player graphics.
 
-LDA #$1F          ; same, missiles enabled, double‑res
-STA GRACTL
-```
+Useful bits:
 
-## Colour and Priority
+| Register | Bit | Meaning |
+|---|---:|---|
+| `DMACTL` | 2 | Missile DMA |
+| `DMACTL` | 3 | Player DMA |
+| `DMACTL` | 4 | Single-line PMG resolution |
+| `DMACTL` | 5 | Display-list DMA |
+| `GRACTL` | 0 | Missile display enable |
+| `GRACTL` | 1 | Player display enable |
+| `GRACTL` | 2 | Trigger latch enable |
 
-PMPRIOR at `$D01B` selects player-to-player priority ordering and the priority of players vs missiles. The priority field is a four‑bit priority level: 0 – player 1 most visible; 15 – player 4 most visible. Individual priority ordering for missiles uses a three‑bit mask in register `$D01C`.
+```asm
+pm_base_page = >pm_area
 
-COLPF0–COLPF3 write the colour for each player object; COLPM0–COLPM3 is the missile colour. PRIOR multiscreen priority is handled by the P/M gate, which conflicts with GTIA overlap priority — see §8 of GTIA or the CPIOLK bitmask described in the GTIA status page. The fork result is: the P/M gate will overwrite GTIA in the color‑pile at the requested direct‑overlay address line.
+init_pmg
+        lda   #0
+        sta   GRACTL
 
-## Vertical Mirror Ring Count and Double-Resolution
+        lda   #pm_base_page
+        sta   PMBASE          ; $D407
 
-When GRACTL bit 4 is cleared, players are drawn at one scan-line per byte in PMG memory (single vertical resolution). When bit 4 is set, each byte in PMG memory maps one scan-line to two television scan-lines — the scan is drawn twice, yielding twice the vertical resolution. In double‑resolution the PMG buffer doubles in size — 256 bytes per player instead of 128.
+        lda   #0
+        ldx   #0
+?clear  sta   pm_area,x
+        sta   pm_area+$100,x
+        sta   pm_area+$200,x
+        sta   pm_area+$300,x
+        sta   pm_area+$400,x
+        sta   pm_area+$500,x
+        sta   pm_area+$600,x
+        sta   pm_area+$700,x
+        inx
+        bne   ?clear
 
-Memory table with different resolution enabled:
-
-| Mode         | Bytes per player | Total bytes (4 players + 4 missiles) |
-|--------------|-----------------|---------------------------------------|
-| Single‑res   | 128             | 768                                   |
-| Double‑res   | 256             | 1 536                                 |
-
-The PMG DMA engine fetches PMG data each scan-line. Each scan-line DMA cycle fetches one byte per active object. The timing pull for PMG DMA must fit before ANTIC DMA starts on line 0; if PMBASE is low (below `$4000`), a DMA collision may fault during display.
-
-## Horizontal Position Registers
-
-HPOSP0–HPOSP3 (`$D000–$D003`) place player objects. HPOSM0–HPOSM3 (`$D008–$D00B`) place missiles.
-
-Values are 8‑bit one byte scan‑line timing positions 1–255. Each object starting position is 1 CPU cycle per count. Zero should be avoided — zero horizontal position produces a wrap to the right edge of screen, which is visual garbage.
-
-After changing HPOSx or HPOSMx, write a delay before writing GRACTL to avoid one‑scan‑line collision where PMG fetch address wrap out.
-
-## Missile-to-Player Collision — Collision Detection
-
-M0PF–M3PF and M0PL–M3PL at `$D00E` and `$D00F` hold one‑byte collision flags for each object overlap and for player-to-player. The read bits for missile-to-player overlap form a collapsing priority. On read, bit N = 1 means object N detected a collision.
-
-Write `$FF` to clear collision bits.
-
-```
-LDA #$FF
-STA HITCLR    ; clears all P/M and player-vs-object collision flags
-```
-
-Always clear HITCLR registers before enabling PMG DMA; stale collision flags may fire stale detection after screen reset.
-
-## Player-Missile‑Priority Relationship to GTIA Overlap
-
-GTIA 9–11 priority (GTIA9+ priority register `$D01E` bit 5–7) overrides P/M‑to‑background order but does not replace the object‑to‑object priority set in PMPRIOR. The hardware priority resolution is:
-
-```
-object > player > playfield > background
+        lda   #%00111110      ; DL DMA + single-line PMG + players + missiles + normal PF
+        sta   DMACTL
+        lda   #%00000011      ; show missiles + players
+        sta   GRACTL
+        lda   #$ff
+        sta   HITCLR
+        rts
 ```
 
-GTIA mode 9–11 shift-the-playfield priority behind playfield objects with the zero unset pixel. Combine this with PMG overlay to generate a full three‑layer sprite plane.
+If the OS is active, write the OS shadow `SDMCTL ($022F)` instead of only `DMACTL`; the OS VBI copies `SDMCTL` back to hardware.
 
-## Double‑Size Collision (Responsive)\_size and `M0C/ M1/ M2CO/M3C` impact. When double‑resolution is cleared instead the player collides narrower in scan line width — making a one pixel tall collision box shorter than the visual display, which consistently frustrates sprite‑based gameplay with multiple players on‑screen. Use double‑resolution only for preview effect, not for collision‑driven software. Hong Kong Gold bases for `NABU` COM base collision uses double resolution. Granular layout.
+## §3 Move Players and Missiles
 
-## Priority and Merge Order
+Vertical movement is a memory copy into the object's PMG lane. Clear at least one byte above and below the previous footprint to prevent trails.
 
-Object scan line fetch with stretch mode, pixel position restarts into `GRACTL` flags `$01–$08`. High per priority selective car — model bitmask important image priority merge step within `$D01B–$D01C` (`$D01B` = priority order, `$D01C` = missile size mask). This tells PM/GTIA mixer which player pixel can override the playfield colour.
+```asm
+move_player0
+        ; A/X = source pointer, Y = vertical byte offset, hpos = horizontal position
+        sta   src
+        stx   src+1
+        sty   vpos
 
-## Initialization Sequence (reference)
+        lda   #0
+        sta   pm_area+$0400-1,y
+        sta   pm_area+$0400+sprite_h,y
 
+        ldx   vpos
+        ldy   #0
+?copy   lda   (src),y
+        sta   pm_area+$0400,x
+        inx
+        iny
+        cpy   #sprite_h
+        bne   ?copy
+
+        lda   hpos
+        sta   HPOSP0          ; $D000
+        rts
 ```
-LDA #<pmg_buf
-STA PMBASE          ; point PMG to RAM buffer
 
-LDA #%00000000      ; single‑res, players 0+1 off initially
-STA GRACTL
-LDA #$FF
-STA HITCLR          ; clear collision flags
+Horizontal position registers:
 
-; enable players 0+1 with single‑res
-LDA #$0F
-STA GRACTL
+| Register | Address | Object |
+|---|---:|---|
+| `HPOSP0`-`HPOSP3` | `$D000`-`$D003` | Players |
+| `HPOSM0`-`HPOSM3` | `$D004`-`$D007` | Missiles |
 
-LDA #$0A            ; green on player 0
-STA COLPF0
-STA COLPM0
+## §4 Colors, Sizes, and Priority
+
+| Register | Address | Purpose |
+|---|---:|---|
+| `PCOLR0`-`PCOLR3` | `$02C0`-`$02C3` | OS shadows for player/missile colors |
+| `COLPM0`-`COLPM3` | `$D012`-`$D015` | Hardware colors; write in DLI |
+| `SIZEP0`-`SIZEP3` | `$D008`-`$D00B` | Player horizontal size |
+| `SIZEM` | `$D00C` | Two bits per missile size |
+| `PRIOR` | `$D01B` | P/M vs playfield priority and fifth-player mode |
+
+Player size values are `0` normal, `1` double width, `3` quadruple width. `SIZEM` packs four 2-bit missile sizes:
+
+```asm
+; missile 0 normal, missile 1 double, missile 2 quad, missile 3 normal
+        lda   #%00110100
+        sta   SIZEM
 ```
+
+Use `PCOLR0`-`PCOLR3` during normal OS-driven frames. Use `COLPM0`-`COLPM3` directly inside DLI code because shadow writes will not affect the current scan line.
+
+## §5 Collision Registers
+
+PMG collision latches remain set until `HITCLR ($D01E)` is written.
+
+| Range | Purpose |
+|---|---|
+| `$D000`-`$D003` read | Missile-to-playfield collisions |
+| `$D004`-`$D007` read | Player-to-playfield collisions |
+| `$D008`-`$D00B` read | Missile-to-player collisions |
+| `$D00C`-`$D00F` read | Player-to-player collisions |
+
+```asm
+read_collision
+        lda   P0PF            ; player 0 vs playfields
+        bne   ?hit
+        rts
+?hit    lda   #$ff
+        sta   HITCLR
+        rts
+```
+
+Clear `HITCLR` after initializing PMG and after each collision sample.
+
+## §6 DLI Multiplexing
+
+Hardware gives four players and four missiles, but a DLI can reuse them in separate vertical bands by changing `HPOSPn`, `SIZEPn`, `COLPMn`, and the PMG memory bytes before the next band is drawn.
+
+Rules:
+
+- Precompute band position/color tables in VBI; keep DLI work to loads and stores.
+- Page-align DLI handlers when a chain is long.
+- Leave a vertical gap when reusing one player in adjacent bands, especially in Mode 4 displays where tight timing can expose a one-scan-line artifact.
+- If a tracker or another subsystem owns `VDSLST`, centralize DLI ownership instead of installing competing handlers.
+
+For CPU-rendered sprite engines that combine with PMG overlays, keep PMG for small high-priority objects and use `graphics/software-sprites.md` for the background sprite layer.

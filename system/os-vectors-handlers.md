@@ -16,6 +16,7 @@ description: >-
 | Need | See |
 |---|---|
 | DLI/VBI ownership | §1 |
+| Deferred VBI install/return | §1.1 |
 | OS entry vectors | §2 |
 | CIO/IOCB lifecycle | §3 |
 | SIO/DCB calls | §4 |
@@ -39,6 +40,32 @@ Rules:
 - Install VBI code with `SETVBV`; return deferred VBI code through `XITVBV`.
 - Do not use `VDSLST` as a VBI vector.
 - If multiple systems need DLI ownership, chain by changing `VDSLST` inside each DLI band or centralize ownership in one raster manager.
+
+### 1.1 Deferred VBI via SETVBV / XITVBV
+
+Install deferred VBI handlers through `SETVBV` and leave them through `XITVBV`. The OS path restores registers and completes the VBI chain; a raw `RTI` from a deferred VBI can break later VBI/DLI delivery.
+
+```asm
+init_deferred_vbi
+        ldx   #>my_vbi
+        ldy   #<my_vbi
+        lda   #$07            ; deferred VBI slot
+        jsr   SETVBV
+        rts
+
+my_vbi
+        pha
+        txa
+        pha
+        tya
+        pha
+
+        ; frame work here
+
+        jmp   XITVBV          ; not RTI
+```
+
+Use immediate VBI only for short hardware-critical work. Put ordinary frame updates, input snapshots, music ticks, and buffer swaps in deferred VBI unless the program owns the whole NMI path.
 
 ## 2. OS Entry Points and User Vectors
 
