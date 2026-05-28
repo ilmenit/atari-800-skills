@@ -64,7 +64,7 @@ This skill is self-contained. The topic files below are the available reference 
 
 ## 6. `tooling/` — Build, Examples, Reversing
 
-- **`tooling/mads-assembler.md`** — MADS syntax, directives, macros, procedures, banks, relocatables, 65816 addenda.
+- **`tooling/mads-assembler.md`** — Compact MADS syntax, directives, macros, procedures, banks, relocatables, 65816 addenda. For full MADS assembler documentation, use the standalone `mads/` skill.
 - **`tooling/code.md`** — Ready-to-read examples: sieve, Tetris, RLE, GTIA 9++, 40x40, demoscene catalog.
 - **`tooling/reversing.md`** — XEX/ATR/source/listing triage, segment maps, depackers, Altirra tracing, hardware breakpoints.
 
