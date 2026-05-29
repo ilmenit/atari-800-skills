@@ -1,3 +1,10 @@
+---
+name: atari8bit-digital-audio
+description: >-
+  Atari POKEY digital audio playback: 4-bit volume-only PCM/PDM, VCOUNT-timed
+  sample kernels, nibble packing, channel selection, timing, and IRQ coexistence.
+---
+
 # 4-Bit Digital Sample Playback
 
 POKEY volume is a 4-bit register ($0–$F for AUDCn volume bits). Rapidly writing volume-only values to AUDC3/AUDC4 produces 4-bit digital audio. Unpack a full 8-bit sample into two nibbles: upper nibble → high volume burst; lower nibble → next burst. At ~3.9 kHz (one nibble every two scan lines on NTSC), the result is a clean 4-bit sample stream.
@@ -94,3 +101,47 @@ play_sample
 
 > [!WARNING]
 > **÷0 in VCOUNT timing:** VCOUNT is 8-bit (0–255); PAL machines reach scan line 155, NTSC machines wrap at scan line ~262 but the counter only counts to 255. Always use `CMP next_vcount_max` where `next_vcount_max = 130` for NTSC / 155 for PAL — don't assume a universal value.
+
+## Variable Pitch and Mixing
+
+For one-shot effects, a fixed VCOUNT cadence is enough. For music engines or
+sampled effects with pitch, keep playback time fixed and advance the sample
+position by a fixed-point step.
+
+```asm
+; 16.8 fixed-point sample cursor. One output tick:
+; samp_pos_hi:lo.frac points into sample data, step_hi:step_frac is pitch.
+advance_sample
+        lda   samp_frac
+        clc
+        adc   step_frac
+        sta   samp_frac
+        lda   samp_lo
+        adc   step_lo
+        sta   samp_lo
+        bcc   @same_page
+        inc   samp_hi
+@same_page
+        rts
+```
+
+Use `step = 1.0` for native pitch, `2.0` for one octave up, `$0180` for 1.5x,
+etc. This changes which source samples are consumed while the POKEY output rate
+stays stable.
+
+For multiple sample voices, mix into a wider accumulator before reducing to
+POKEY's 4-bit volume:
+
+- Convert nibbles to signed or centered values before summing.
+- Use a volume lookup table: `scaled = sample * volume / 16` or `/64`.
+- Clamp or bias the mixed result back to `0..15`, then OR with `$10` for
+  volume-only mode.
+- Keep the IRQ/VCOUNT output routine constant-time; do variable work in the
+  main loop or a lower-priority VBI when possible.
+
+Interpolation can improve high-pitch playback but costs cycles. On stock XL/XE,
+prefer nearest-sample stepping unless the mixer has a very small voice count.
+
+Source note: the fixed-point stepping and volume-table advice comes from the
+portable digital-mixing discussion in C= Hacking issue 20; the output register
+and timing rules here remain Atari POKEY-specific.

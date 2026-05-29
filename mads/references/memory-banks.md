@@ -2,7 +2,7 @@
 
 Probably everyone who has dealt with the small **Atari** architecture associates the term *memory bank* with extended memory, divided into **16kb** banks, switched into the `$4000..$7FFF` area.
 
-**MADS** can also understand it this way (`OPT B+` option, [Hardware memory banks](#hardware-memory-banks-opt-b)), but by default it understands it in a more virtual way (`OPT B-` option, [Virtual memory banks](#virtual-memory-banks-opt-b-)).
+**MADS** can also understand it this way (`OPT B+` option, [Hardware memory banks](#hardware-memory-banks-opt-b)), but by default it understands it in a more virtual way (`OPT B-` option, [Virtual memory banks](#virtual-memory-banks-opt-b)).
 
 The following pseudo-commands apply to banks:
 

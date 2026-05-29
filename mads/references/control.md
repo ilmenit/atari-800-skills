@@ -1,10 +1,10 @@
 ## Assembly Control
 
-### [Changing assembly options](pseudo-commands.md#opt)
+### [Changing assembly options](pseudo-commands/assembly-options.md#opt)
 
-### [Conditional assembly](directives.md#if_else)
+### [Conditional assembly](directives/conditionals-repeat.md#if_else)
 
-### [Interrupting assembly](directives.md#error)
+### [Interrupting assembly](directives/file-output.md#error)
 
 ### Zero Page Assembly
 
@@ -99,4 +99,4 @@ copy  mva .adr(temp),y temp,y+
       bne copy
 ```
 
-More information on the functioning of the [.ADR](directives.md#adr) and [.LEN](directives.md#sizeof) directives.
+More information on the functioning of the [.ADR](directives/data-storage.md#adr) and [.LEN](directives/file-output.md#sizeof) directives.

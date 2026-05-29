@@ -6,7 +6,7 @@ description: >-
 
 # 06 — Input Devices
 
-> Supplementary code patterns from Atari 8-bit reference articles and hardware reference cards. Content is self-contained.
+> Supplementary code patterns for keyboard, joystick, paddle, mouse, light-pen, and console-key input. Content is self-contained.
 > **Scope:** Joystick/paddle/trackball, mouse/tablet, light pen, XEP80, console keys
 > **Key items:** STICK0-3 OS shadows $0278-$027B, PORTA/PORTB $D300/$D301, TRIG0-3 $D010-$D013, PADDL0-7 shadows $0270-$0277 / hardware $D200-$D207, CONSOL $D01F, PENH/PENV $D40C/$D40D
 

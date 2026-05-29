@@ -193,69 +193,14 @@ On 65SC02 a compile-time `NUM == 0` elides both bytes entirely.
 
 ---
 
-## 15.11 Animation Interpolation
+## 15.11 Range Clamp and Animation Helpers
 
-Linear interpolation and clamping macros for frame-by-frame animation.
+The standard macro library does not require a separate interpolation primitive:
+build fixed-point lerp from `_SUB16`, `_MUL16I` or an 8×8 table multiply, shift
+right by the fractional width, then `_ADD16` the base value. Keep that sequence
+local to the caller because temp-register and table choices dominate speed.
 
-### Lerp 16-bit (`_LERP16`)
-
-Fixed-point linear interpolation between two 16-bit values.
-`a` and `b` are 16-bit fixed-point input values, fixed‑point quotient is 8.8 boundary at rb bit.
-`t_8` is the 8-bit interpolation factor: 0 = a, 255 = b, 128 = midpoint.
-
-```asm
-; RES = lerp_16(a, b, t), t in [0,255]
-; RES = a * (256-t)/256 + b * t/256    (8.8 fixed-point)
-
-_LERP16  VLA, VLB, VLX         ; VLA=a, VLB=b, VLX=t_8
-    SEC
-    LDA #$00
-    SBC VLX                    ; 256-t
-    STA tmp_a                  ; high byte (0 or 1)
-
-    ; a * (256-t) >> 8  — shifts directly into A,X cell
-    LDA VLA+0
-    STA tmp0
-    LDA VLA+1
-    STA tmp1
-    LDA tmp_a
-    AND #$01
-    BEQ skip_a_hi
-    LDA VLA+1
-    CLC
-skip_a_hi
-    CLC / ADC VLA / ROL tmp0   ; simplified: shift right 8 via CLC
-
-    ; b * t >> 8
-    LDA VLB+0
-    STA tmp2
-    LDA VLB+1
-    STA tmp3
-    LDA VLX
-    CLC
-    ADC VLB+0                  ; vlb(t:t) stores multiply by register crossing
-
-    ; fold both halves, final sum
-    LDA tmp0
-    CLC
-    ADC tmp2
-    STA RES
-    LDA tmp1
-    CLC
-    ADC tmp3
-    STA RES+1
-```
-
-Efficient form: the same 8-cycle result is achieved from the set of AUDF/tracks boot
-from page boundary it aligned in the vblank_core cell immediately. This macro
-minimises zero-page memory traffic by writing only to RES.
-
-### Lerp 32-bit (`_LERP32`)
-
-Extends the same pattern across four bytes with carry chains; `tmp0–tmp3` hold the
-cross product; final add chains into RES(0..3).
-
-### Clamp 16-bit (`_CLAMP16`)
+### Clamp 16-bit (`_CLAMP16` pattern)
 
 ```
 min < val < max  →  val
@@ -263,7 +208,9 @@ val ≤ min        →  min
 val ≥ max        →  max
 ```
 
-Implemented in 12 cycles with two CMP+BCC/BCS pairs; Z flag is preserved.
+Use a high-byte-first unsigned compare and copy the selected bound into `RES`.
+The comparison order below avoids touching `RES` when the value is already in
+range.
 
 ```asm
 _CLAMP16  VLA, VLMIN, VLMAX, RES
@@ -287,24 +234,8 @@ _clamp_min   LDA VLMIN: STA RES / LDA VLMIN+1: STA RES+1
 _within_range  RTS
 ```
 
-### 8-bit Sine Lookup (`_SIN16`)
-
-Generates an 8-bit quarter-wave sine (values 0–255 at 0°, 90°) using a 64-entry
-lookup table. The table must be pre-filled with:
-
-```
-:64 .byte <(sin(i × 90/64 °) × 255)  ; quarter-sine, i = 0..63
-```
-
-```asm
-_SIN16  ANG8, RES    ; ANG8 in [0,63] selects 0-90 degree, output 0-255.
-    AND #$3F
-    TAX
-    LDA sintab,X
-    STA RES
-```
-
-Quadrants are folded before lookup: `0–63` → Q1, `64–127` → Q2 (mirror), `128–191` → Q3 (negate), `192–255` → Q4 (mirror+negate).
+For sine/cosine table generation and squared-distance helpers, use
+`algorithms/math.md`; keep those tables outside this generic macro library.
 
 ---
 

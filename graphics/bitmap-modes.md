@@ -1,26 +1,33 @@
+---
+name: atari8bit-bitmap-modes
+description: >-
+  Atari ANTIC and GTIA bitmap graphics modes: hires and multicolor screen memory,
+  line addressing, 240-line modes, GTIA overlays, plotting, and custom layouts.
+---
+
 # Bitmap Graphics Modes
 
 ## Bitmap Architecture
 
-ANTIC bitmap modes map the screen memory as a raw scan-line buffer with no decode step between address order and pixel position. Graphics 8 (ANTIC E) offers the most compact form: 320 pixels per line, 8 pixels per byte, pixel value held in bits 0–3, the high nibble unused. Graphics 9 through 11 overlay ANTIC F with the graphics processor, allowing per-pixel colour changes in GTIA mode. Graphics 12–14 (ANTIC A, B, C) are the 160‑pixel wide double-line modes, each pixel carrying one colour resolution bit per pixel.
+ANTIC bitmap modes map the screen memory as a raw scan-line buffer with no decode step between address order and pixel position. Graphics 8 is ANTIC F: 320 pixels per line, 8 one-bit pixels per byte, 40 bytes per scan line. Graphics 15 is ANTIC E: 160 pixels per line, four 2-bit pixels per byte, also 40 bytes per scan line. Graphics 9 through 11 are GTIA interpretations of ANTIC F bytes. Graphics 12–14 (ANTIC A, B, C) are the 160-pixel wide double-line modes.
 
 Writes to bitmapped picture memory go direct — no read‑modify‑write cycle, no character cell indirection — because the write address maps directly to the scan line. The programmer writes the numeric colour directly to the byte address: zero clears the pixel, non-zero sets the pixel. Standard palette values written to the high nibble path: $0 is background, $1–$F are the 15 foreground colours.
 
 The picture memory size for each mode:
 
 ```
-Graphics 8    320 × 192 = 8 192 bytes  ($2000)  — single page, standard
-Graphics 9–11 320 × N    = 16 384 bytes ($4000)  — GTIA 9 overlay each pixel colour (reads from COLBK / COLPFx per scan)
-Graphics 12    160 × 192 = 7 680 bytes  ($1E00)
-Graphics 13    160 × 192 = 7 680 bytes
-Graphics 14    160 × 192 = 7 680 bytes
+Graphics 8    ANTIC F, 320 × 192, 1 bpp = 7 680 bytes ($1E00)
+Graphics 15   ANTIC E, 160 × 192, 2 bpp = 7 680 bytes ($1E00)
+Graphics 9–11 GTIA over ANTIC F bytes; same memory size as GR.8
+Graphics 12–14 160-wide double-line modes; memory depends on visible rows
 ```
 
-Playing against 230 XE extended RAM is practical only with extra screen memory set to the high bank.
+Using 130XE extended RAM for extra screens is practical only when the display
+buffer is mapped into the active `$4000-$7FFF` window before ANTIC fetches it.
 
 ## Hires Screen Layout and Addressing
 
-Graphics 8 (ANTIC E) uses scan-line sequential addressing. The screen width is 40 bytes per line (320 pixels ÷ 8). The starting address of line L bytes down is:
+Graphics 8 (ANTIC F) and Graphics 15 (ANTIC E) use scan-line sequential addressing. The screen width is 40 bytes per line. The starting address of line L bytes down is:
 
 ```
 screen_addr = screen_base + (L × 40)
@@ -43,7 +50,8 @@ screen_ptr_for_y
 
 ## Bitmap Plotting Primitives
 
-For 2-bit-pixel modes, four pixels share one byte. Split X into byte offset and pixel-in-byte:
+For 2-bit-pixel modes such as Graphics 15, four pixels share one byte. Split X
+into byte offset and pixel-in-byte:
 
 ```asm
 ; byte_x = x / 4, pixel = x & 3
@@ -76,9 +84,79 @@ put_pixel_2bpp
         rts
 ```
 
+Table-driven Graphics 15 plot, 160x192:
+
+```asm
+COLOR = 1
+adr   = $80
+
+; in: Y = y, X = x
+plot_g15
+        lda   lnadl,y
+        sta   adr
+        lda   lnadh,y
+        sta   adr+1
+        ldy   byteoff,x
+        lda   (adr),y
+        and   bytemask,x
+        ora   bytepxl,x
+        sta   (adr),y
+        rts
+
+lnadl    :192 .byte <(screen+40*#)
+lnadh    :192 .byte >(screen+40*#)
+byteoff  :160 .byte #/4
+bytemask :160 .byte ~(%11 << (6 - ((# & %11) * 2)))
+bytepxl  :160 .byte COLOR << (6 - ((# & %11) * 2))
+```
+
+Graphics 8 hires plot, 320x192. Pass the high X bit in carry and low 8 bits in
+X; this avoids a 16-bit X coordinate in memory:
+
+```asm
+COLOR = 1
+adr   = $80
+
+; in: Y = y, X = x low byte, C = x bit 8
+plot_g8
+        lda   lnadl,y
+        sta   adr
+        lda   lnadh,y
+        sta   adr+1
+        bcs   @x1xx
+@x0xx   ldy   byteoff,x
+        lda   (adr),y
+        and   bytemask,x
+        ora   bytepxl,x
+        sta   (adr),y
+        rts
+@x1xx   ldy   byteoff+$100,x
+        lda   (adr),y
+        and   bytemask,x
+        ora   bytepxl,x
+        sta   (adr),y
+        rts
+
+lnadl    :192 .byte <(screen+40*#)
+lnadh    :192 .byte >(screen+40*#)
+byteoff  :320 .byte #/8
+bytemask :256 .byte ~(1 << (7 - (# & %111)))
+bytepxl  :256 .byte COLOR << (7 - (# & %111))
+```
+
 Horizontal lines are fastest when the middle bytes are full-byte fills and only the edge bytes are masked. If both endpoints land in the same byte, combine both edge masks before writing.
 
-For extended RAM or cold-start video, initialise the display before the first frame is fetched. The 240-line cold-start sequence must disable screen DMA, install the display list without JVB, point DLI at the line-247 shutdown, set deferred VBI at `$0222`, then re-enable DMA only in the deferred slot after VBLANK has established. The full initialisation is:
+For extended RAM or cold-start video, initialise the display before the first frame is fetched. A true 240-line hires/GTIA display must disable playfield DMA before the end of scan line 247 and re-enable it at scan line 8. Keep the display list free of `JVB`; the VBI resets `DLPTR/SDLSTL` for the next frame.
+
+Display-list height choices:
+
+| Mode | 240-line form |
+|---|---|
+| ANTIC 2 text/hires character rows | 30 rows * 8 scan lines |
+| ANTIC 3 text rows | 24 rows * 10 scan lines |
+| ANTIC F / Graphics 8 / GTIA 9-11 | 240 one-scanline mode bytes |
+
+The full initialisation pattern is:
 
 ```
 init_240lines:
@@ -110,17 +188,12 @@ init_240lines:
     CLI                     ; re-enable IRQ
     RTS
 
-; --- display list: 99×8 + 99×8 + 38×8 scan lines, no JVB ---
+    ; --- display list: 30 ANTIC 2 rows = 240 scan lines, no JVB ---
 dlist240:
-    .byte $0E | $40          ; LMS
-    .word screen_a
-    :99  .byte $0E           ; 792 pixels = 99 scan lines
-    .byte $0E | $40          ; LMS
-    .word screen_b
-    :99  .byte $0E
-    .byte $0E | $40          ; LMS
-    .word screen_c
-    :38  .byte $0E           ; 38 scan lines → ends at line 247
+    .byte $02 | $40          ; LMS
+    .word screen
+    :28  .byte $02
+    .byte $02 | $80          ; DLI on final 8-scanline row
 
 ; --- DLI: fires at the top of scan line 248 (last drawn is 247) ---
 dli_247:
@@ -136,7 +209,7 @@ vbi_deferred:
     LDX VCOUNT
     CPX #4                   ; scan line 8 = VCOUNT = 4
     BNE vbi_deferred
-    LDA #%00100000           ; bits 5-7=0, bits 0-1=0 : single-res GR8+DMA
+    LDA #%00100010           ; display-list DMA + normal playfield DMA
     STA DMACTL
     RTS                      ; returns through JEXITVB
 ```
@@ -146,26 +219,15 @@ vbi_deferred:
 
 ANTIC can draw only 239 full scan lines in hires before violating vertical hold. The VBLANK interval starts at scan line 248. Hires raster positions 8–247 cover 240 scan lines, but including JVB reach from the display list forces the ANTIC engine to halt at the final line and sync. Drawing the full 240 lines in GR.8 without a blank line at the bottom breaks vertical hold.
 
-The workaround — documented in a reference article on the 240-line hires mode — is a DLI‑gated disable on line 247, a deferred-frame VBI re‑enable before line 8, and no JVB instruction in the display list itself.
+The workaround is a DLI-gated disable on line 247, a deferred-frame VBI
+re-enable before line 8, and no JVB instruction in the display list itself.
 
-### Display List (240 lines, GR.8)
+### Display List Notes
 
-```
-dlist:
-    .byte $0E | $40          ; LMS
-    .word screen_part1
-    :99  .byte $0E           ; 99 × 8 = 792 pixels = 99 scan lines
-
-    .byte $0E | $40          ; LMS
-    .word screen_part2
-    :99  .byte $0E
-
-    .byte $0E | $40          ; LMS
-    .word screen_part3
-    :38  .byte $0E           ; 38 × 8 = 304 pixels = 38 scan lines  →  line 247
-
-    ; JVB REMOVED — VBI sets DLPTR directly
-```
+A conventional hires/GTIA display list with JVB can safely use 239 scan lines
+and leave one blank line at the bottom. For true 240 lines, remove JVB and use
+the DLI/VBI DMA gate above. For Graphics 8/GTIA 9-11, use ANTIC `$0F` bytes
+instead of `$02` rows and place the DLI bit on the last visible mode byte.
 
 ### DLI (line 247, disables DMA)
 
@@ -188,18 +250,23 @@ vbint:
     CMP #4                   ; wait until scan line 4 (line 8 ÷ 2)
     BNE vbint
 
-    LDA #%00100000           ; screen DMA enabled
+    LDA #%00100010           ; display-list DMA + normal playfield DMA
     STA DMACTL
     RTS                      ; returns through JEXITVB → OS sets DMACTL shadow
 ```
 
-DMACTL shadow — the OS VBI writes the offline deferred write to DMACTLS (`$22F`) rather than to DMACTL hardware. The undocumented shadow `$22F` behaves identically to `$D400`: set both bits 4–7 (fine scroll) clear bits 0–3 (no effect); the shadow register is write‑equivalent so hardware is also reset to next screen DMA when the VBI writes the shadow.
+Keep the OS shadow `SDMCTL/DMACTLS ($022F)` with screen DMA disabled while using this trick. The OS VBI copies shadows to ANTIC before deferred VBI runs; if the shadow already enables playfield DMA before scan line 8, vertical sync can break again. The deferred VBI should wait for `VCOUNT=4` (physical scan line 8) and then write hardware `DMACTL ($D400)` to re-enable display DMA for the visible area.
 
 ## Custom Video Modes
 
 ### Narrow Display (32-byte row, ZX Spectrum layout)
 
-Setting ANTIC mode `$4F` or $70 with a repeat of 64 produces a sequence of 64 display rows, each row 32 bytes wide. The programmer swaps the character base pointer every eight rows via DLI, cycling through three separate ANTIC screens in VRAM banked area. This yields a full ZX Spectrum‑compatible physical screen layout: the screen set looks original in layout and output. The DLI cycles three times per frame, swapping CHSBase on each pass to point to a different quadrant of banked display memory. Details in a reference article on non-standard ANTIC graphics modes.
+Setting ANTIC mode `$4F` or `$70` with 32-byte rows produces a narrow playfield
+layout suitable for ZX Spectrum-style screen conversions. Swap `CHBASE` every
+eight scan lines via DLI and cycle through three character sets or screen
+regions so the ANTIC row order matches the source layout. Keep each target
+charset on a 1 KB boundary and update the hardware `CHBASE` register directly
+inside the DLI.
 
 ### Acorn Electron / 6845 Mode Emulation
 

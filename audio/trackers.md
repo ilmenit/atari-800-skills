@@ -1,3 +1,10 @@
+---
+name: atari8bit-trackers
+description: >-
+  Atari music tracker integration for RMT, MPT, and TMC2: module layout, player
+  ABI, VBI timing, feature files, relocators, stereo fallback, and interrupt sharing.
+---
+
 # Music Trackers
 
 ## TMC2 Tracker Format
@@ -53,7 +60,7 @@ $00–$07   Signature "RasterM"
 $08       Internal flags — POKEY alt-clock flag, PAL flag, instrument pack flag
 $09–$10   Pattern pointers per track  (9 pointers, next two bytes each = 18 bytes)
 $19       Restart pattern
-...
+$1A..     Player-specific pattern/order/instrument pointer area
 ```
 
 Play rate defaults to 50 Hz PAL or 60 Hz NTSC. All RMT timing is computed on the 1.789 77 MHz clock rather than the 64 kHz base, so sample rates inside the RMT player are accurate to 1 cent across all PAL/NTSC regimes without a manual offset entry.
@@ -89,7 +96,10 @@ When both TMC2 and RMT drivers are absent, TMC2 does not provide DLI-bound effec
 
 ## Practical RMT/MPT Relocator Patterns
 
-The MADS tracker relocator examples are useful because they show the whole build shape, not just the player routine. If the corpus is not present in the workspace, ask the user for the examples path before trying to inspect the original source.
+Tracker relocator examples are useful because they show the whole build shape,
+not just the player routine. The stable pattern is: include the player, include
+or generate the module feature file, relocate module data to a fixed address,
+then call init/play/silence through documented player entry offsets.
 
 RMT demo pattern:
 

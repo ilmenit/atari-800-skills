@@ -79,3 +79,4 @@ This skill is self-contained. The topic files below are the available reference 
 - OS/device/file/vector questions belong in `system/`; build examples and reverse workflows belong in `tooling/`.
 - Prefer the narrowest topic file that directly matches the request.
 - If a task needs both hardware facts and implementation guidance, load the hardware topic first, then the graphics, audio, system, or tooling topic that covers the code path.
+- When copying assembly snippets, copy the whole contract: routine, declared input/output registers or memory, scratch bytes, required lookup tables, and any init routine. If a topic provides generated tables, prefer those over incomplete symbolic table names.

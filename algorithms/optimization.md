@@ -72,6 +72,45 @@ JumpHi  .byte >(State0-1), >(State1-1)
 
 This avoids a zero-page temp pointer and is reentrant as long as the stack is not near overflow. Do not use inside deep interrupt nesting unless stack depth has been audited.
 
+If self-modifying code is allowed, patch an absolute `JSR`/`JMP` operand from
+split low/high tables. This is often fastest from RAM:
+
+```asm
+        lda   TargetLo,y
+        sta   @call+1
+        lda   TargetHi,y
+        sta   @call+2
+@call   jsr   $ffff            ; or JMP $ffff
+```
+
+For ROM/cartridge code, keep a page-aligned table of `JMP target`
+instructions. A `JSR` into the selected table entry returns from the final
+target normally:
+
+```asm
+        lda   Mul3,y            ; 0,3,6,...
+        sta   @call+1
+@call   jsr   JumpStubs
+
+        .align $100
+JumpStubs
+        jmp   State0
+        jmp   State1
+        jmp   State2
+```
+
+For non-returning dispatch, an indirect jump table can be faster and smaller
+than split loads when Y already holds the entry:
+
+```asm
+        tya
+        asl
+        sta   @jmp+1
+@jmp    jmp   (JumpPtrs)
+
+JumpPtrs .word State0, State1, State2
+```
+
 ## 3. Flag-Preserving Tests
 
 Use `BIT` when you need N/V/Z from memory without destroying A.
@@ -187,6 +226,18 @@ entry11 lda   #11
 common  sta   target
         rts
 ```
+
+When flags are known, a branch opcode byte can mask a one-byte instruction
+without changing flags or touching memory:
+
+```asm
+on      sec
+        .byte $90              ; BCC operand skips the following CLC when C=1
+off     clc
+```
+
+Use this only when the flag state is guaranteed; otherwise it is just an
+unreadable conditional branch.
 
 ## 7. Atari Hardware Safety
 

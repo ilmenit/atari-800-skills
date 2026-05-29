@@ -16,6 +16,7 @@ description: >-
 |---|---|
 | OS-ROM disable / re-enable | §9.1 |
 | Trampoline handler skeleton | §9.1 |
+| Calling OS routines while ROM is off | §9.1 |
 | VCOUNT vs VBLANK; PAL VBI split | §9.2 |
 | RESET survival 400/800 vs XL/XE | §9.3 |
 | Warm-flag cold-boot detection | §9.3 |
@@ -46,42 +47,80 @@ With OS ROM off, all software interrupts (keyboard scan, SIO, VBI/DLI dispatch) 
 
 ### Trampoline handler
 
-The trampoline re-enables the OS ROM, enters the correct OS handler path, then restores the OS-off state before returning:
+The robust pattern is:
+
+1. Install RAM vectors under the OS ROM at `$FFFA` and `$FFFE` while ROM is
+   disabled.
+2. Keep the trampoline outside any region that may become ROM or banked RAM.
+3. On interrupt, turn OS ROM back on via `PORTB bit 0`.
+4. Duplicate the original stacked P value when handing control to the ROM
+   handler, because the OS uses I/B flag state to distinguish IRQ-vs-BRK and
+   NMI-during-IRQ cases.
+5. Return through a small `iret` stub that restores the previous `PORTB`
+   configuration and finishes with `RTI`.
+
+Minimal schematic:
 
 ```asm
-os_trampoline_handler
+nmiint  sec
+        .byte $24              ; BIT zp skips CLC below
+irqint  clc
+        inc   PORTB            ; OS ROM on
         pha
         txa
         pha
-        tya
+        tsx
+        lda   #>iret
         pha
-        lda PORTB
-        sta trampoline_PORTB_save
-
-        lda #$01
-        sta PORTB             ; force OS ROM on
-
-        lda NMIST              ; $D40F
-        and #$80               ; DLI?
-        beq @chk_vbi
-        jsr os_dli_entry
-        bne @done             ; always branch
-
-@chk_vbi lda NMIST
-        and #$40               ; VBL?
-        beq @done
-        jsr os_vbi_entry
-
-@done   pla
-        tay
-        pla
+        lda   #<iret
+        pha
+        lda   $0103,x          ; original P pushed by interrupt entry
+        pha
+        bcs   @nmi
+        jmp   ($fffe)          ; IRQ/BRK vector in OS ROM
+@nmi    jmp   ($fffa)          ; NMI vector in OS ROM
+iret    pla
         tax
         pla
-        sta PORTB              ; restore ROM-off state
+        dec   PORTB            ; OS ROM off again
         rti
 ```
 
 **Key insight:** NMIST bits are sticky -- they accumulate until the register is read and cleared. Always read NMIST to both identify and acknowledge the pending source.
+
+### OS Calls While ROM Is Off
+
+If application code calls an OS routine while ROM is banked out, wrap it with a
+PORTB save/restore trampoline. Use official jump-table entries (`SIOV`, `CIOV`,
+`SETVBV`, `XITVBV`) where possible:
+
+```asm
+call_siov_rom_on
+        lda   PORTB
+        pha
+        ora   #$01
+        sta   PORTB
+        jsr   SIOV
+        pla
+        sta   PORTB
+        rts
+```
+
+For handler-table vectors that are stored as `address-1` and entered through
+`RTS`, push the high byte then low byte of the vector and `RTS` into it after
+turning ROM on.
+
+### DLI Fast Path With ROM Off
+
+DLI timing may be too tight for a full ROM trampoline. If the custom NMI entry
+detects `NMIST` bit 7, it may jump directly through `VDSLST ($0200)` with the
+current memory map. The DLI handler must then live outside banked/ROM regions
+and must enable OS ROM itself before calling any ROM routine.
+
+Do not place trampolines, DLI handlers, or OS-call wrappers in these risky
+ranges unless that memory configuration is guaranteed: `$5000-$57FF`,
+`$8000-$9FFF`, `$A000-$BFFF`, `$C000-$FFFF`, `$D000-$D7FF`, `$D800-$DFFF`,
+and `$4000-$7FFF` when XE/RAMBO banking is active.
 
 ---
 
@@ -91,8 +130,8 @@ Without the OS running, RTCLOK is unavailable. `VCOUNT` at `$D40B` is the substi
 
 ```asm
 wait_scanline_80
-        ldx #$50               ; target scan line
-@poll   lda VCOUNT             ; $D40B -- increments every scan line
+        ldx #$50               ; target VCOUNT value, physical scan line / 2
+@poll   lda VCOUNT             ; $D40B -- vertical counter
         cpx VCOUNT
         bne @poll              ; loop until VCOUNT == X
         rts
@@ -100,11 +139,12 @@ wait_scanline_80
 
 | Counter | NTSC range | PAL range | Reset |
 |---------|-----------|-----------|-------|
-| `VCOUNT` | 0--227 | 0--311 | wraps at VBLANK start |
-| VBI split point | line 228 | line 250 | -- |
+| `VCOUNT` | 0--130 | 0--155 | wraps each frame |
+| Physical scan lines | 262 | 312 | -- |
 | Horizontal sync | cycle 0 (per line) | cycle 0 (per line) | -- |
 
 Notes:
+- `VCOUNT` reports the vertical line count divided by two; compare against 130/155, not 262/312.
 - VCOUNT is **not** reset by the RESET key; use a warm-flag in RAM to differentiate cold boot from warm restart see section 9.3.
 - On a hardware reset, VCOUNT holds an indeterminate value -- do not read it until frame 1.
 - `WSYNC` causes the CPU to stall until the NEXT horizontal sync. Cycle count variance depends on where the write lands within the current 114-cycle line.

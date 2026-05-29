@@ -1,3 +1,10 @@
+---
+name: atari8bit-advanced-graphics-effects
+description: >-
+  Atari advanced graphics effects: HIP, RIP, TIP, GTIA 9++, interlaced shade and
+  colour modes, DLI palette switching, conversion constraints, and timing hazards.
+---
+
 # Advanced Graphics Effects (HIP, RIP, TIP, GTIA 9++)
 
 ## HIP / RIP — Interlaced 30-shade × 160 Pixel Display

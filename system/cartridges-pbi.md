@@ -8,7 +8,7 @@ description: >-
 # Cartridges, PBI, and Internal Devices
 
 > **When to load:** The task involves ROM carts, banked carts, PBI devices, IDE/SIDE-like hardware, internal clocks, or device-space reversing.
-> **Primary sources:** Altirra hardware chapters on cartridges/PBI/SIO, Atari reference articles on VBXE/APE-Time, and Jindroush hardware notes linked from Gury's reference-card index.
+> **Scope:** Cartridge windows, PBI devices, internal devices, device IDs, banking, and compatibility notes.
 
 ## Cartridge Basics
 

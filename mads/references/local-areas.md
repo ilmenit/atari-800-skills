@@ -35,7 +35,7 @@ tmp = 7
 
 For the above example, the value of the `TMP` label from the `LVL` local area with the value `3` will be displayed. If the `+` character were missing in `.LOCAL +LVL`, then the `TMP` value displayed would be `7`.
 
-In a `.LOCAL` area, it is possible to define labels with global scope (see chapter [Global labels](#global)).
+In a `.LOCAL` area, it is possible to define labels with global scope (see chapter [Global labels](labels/global.md#global)).
 
 If the label sought by the assembler did not occur in the `.LOCAL` area, then **MADS** will search for it in a lower area until it reaches the global area. To immediately read the value of a global label from a `.LOCAL` area (or another local area), precede the label name with a colon character `:`.
 
@@ -131,3 +131,4 @@ pole lda #0       <---   <--- definition in the local area
  lda pole  <----------------- reference in the local area
 
 .endl                        end of local area declaration
+```

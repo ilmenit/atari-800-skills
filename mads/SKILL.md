@@ -36,9 +36,6 @@ Prefer the smallest reference file that answers the question.
 
 - [references/introduction.md](references/introduction.md): what MADS is, how it
   relates to XASM, compilation notes, and MADS vs XASM differences.
-- [references/changelog.md](references/changelog.md): full version history from
-  the original docs. Load only when a task depends on feature availability by
-  MADS version.
 - [references/mnemonics.md](references/mnemonics.md): supported 6502, illegal
   6502, 65816, and mnemonic-extension notes.
 - [references/cpu-detection.md](references/cpu-detection.md): compile-time CPU
@@ -77,8 +74,7 @@ Prefer the smallest reference file that answers the question.
 
 ### Linking and Output Formats
 
-- [references/relocatable-code.md](references/relocatable-code.md):
-  `.RELOC`, external and public symbols, `.LONGA`, `.LONGI`, and `.LINK`.
+- [references/relocatable-code.md](references/relocatable-code.md): router for `.RELOC`, external and public symbols, `.LONGA`, `.LONGI`, and `.LINK`.
 - [references/spartadosx.md](references/spartadosx.md): SpartaDOS X executable
   file blocks, relocation/update/definition blocks, and SDX programming notes.
 
@@ -98,10 +94,9 @@ Prefer the smallest reference file that answers the question.
   `ORG` / `INS` / `ICL` / `DTA` behavior in
   [references/pseudo-commands.md](references/pseudo-commands.md).
 
-## Source Transfer Notes
+## Reference Layout Notes
 
-The reference files are copied directly or nearly directly from
-`mad-assembler-mkdocs-master/docs/en/docs`. `examples.md` and `projects.md`
-were not transferred because they only contain TODO placeholders. The original
-`index.md` was transferred as `references/changelog.md` because its useful
-content is the MADS change log.
+The bundled `references/` files are the self-contained assembler reference for
+this skill. Load only the specific reference file needed for the task, and keep
+topic work in the Atari router files unless the user is specifically asking
+about MADS syntax, directives, relocation, or SpartaDOS X output.

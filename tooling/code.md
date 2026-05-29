@@ -8,7 +8,7 @@ description: >-
 
 > **Scope:** Working code examples + Atari demoscene catalog: 128B, 256B, 1024B productions; graphics, sound, math, and data-format examples
 > **Key items:** sieve, Tetris (1065bIPS engine), RLE depacker, GTIA9++ boilerplate, 40x40 CHBASE, demoscene index
-> **Primary sources:** `atari-documentation/code-examples/`, `atari-documentation/code-examples/demoscene/`, and the user-provided MADS assembler example corpus when available.
+> **Scope:** Ready-to-read Atari 8-bit code patterns: small programs, RLE, display-list tricks, demoscene techniques, VBXE production patterns, and MADS idioms.
 
 ## Quick-lookup
 
@@ -86,7 +86,7 @@ Copies font from `$8000` to `$8400` on init, then on every scanline: sets `CHBAS
 ```asm
 DI   lda   #$00           ; even line: CHBASE = $8000
        sta   CHBASE
-       ...
+       ; wait/fill to the next scanline boundary
        lda   #$00+$80       ; odd line: CHBASE = $8400
 DU   sta   CHBASE
 ```
@@ -186,7 +186,8 @@ All sections driven by `<RUN_L / EXIT_L>` and `<RUN_H / EXIT_H>` address tables.
 
 ## 14.6 MADS Example Corpus Map
 
-Use the user-provided MADS examples corpus when a task needs runnable MADS idioms rather than isolated algorithms. If the corpus location is not obvious, ask the user for the path.
+Use the bundled MADS example patterns in this skill collection when a task needs
+runnable idioms rather than isolated algorithms.
 
 | Area | Files to inspect | Useful pattern |
 |---|---|---|

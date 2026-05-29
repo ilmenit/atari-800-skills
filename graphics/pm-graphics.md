@@ -1,3 +1,10 @@
+---
+name: atari8bit-pm-graphics
+description: >-
+  Atari player/missile graphics: PMG memory layout, DMA enable sequence, GTIA
+  position/size/priority registers, collisions, movement, and DLI multiplexing.
+---
+
 # Player/Missile Graphics
 
 > **Scope:** Atari hardware players and missiles, PMG memory, GTIA registers, priority, size, movement, and collisions.

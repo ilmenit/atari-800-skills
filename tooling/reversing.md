@@ -42,6 +42,9 @@ Reverse workflow:
 2. Mark any segment writing `INITAD`, `RUNAD`, `DOSINI`, `DOSVEC`, `VDSLST`, `VVBLKI`, `VVBLKD`, `SDLSTL`, or `NMIEN`.
 3. If a segment loads over display RAM, charset RAM, PMG RAM, or zero page, label it as data until control flow proves otherwise.
 4. If the first executable entry only depacks or relocates, trace until the final jump after memory writes stop.
+5. Treat "programs" made only of load segments as valid: some files install
+   screen data, a display list, colors, and shadows without containing CPU
+   opcodes. In those cases the load map is the behavior.
 
 Common addresses:
 

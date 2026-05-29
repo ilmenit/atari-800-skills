@@ -132,7 +132,20 @@ The common stereo upgrade maps the second POKEY at `$D210-$D21F`. Use the same l
 | `$D209` | `$D219` | STIMER |
 | `$D20E/$D20F` | `$D21E/$D21F` | IRQEN/SKCTL |
 
-Detection should be non-destructive: save `IRQEN`, `NMIEN`, and `SKCTL`, briefly prime the second chip, test for the expected timer/IRQ behavior, then restore all registers. See `system/compatibility.md` for the stereo-detection rule; do not write `$D210-$D21F` blindly in mono-safe code.
+Detection should be non-destructive: save `IRQEN`, `NMIEN`, and `SKCTL`, briefly prime the second chip, test for the expected behavior, then restore all registers. Do not write `$D210-$D21F` blindly in mono-safe code.
+
+Three common detection strategies:
+
+| Method | Idea | Result convention |
+|---|---|---|
+| Timer IRQ alias | Enable timer-1 IRQ on `$D21E`; if a normal POKEY IRQ appears on `$D20E`, the second address range is probably only an alias | A=`$80` present, `$00` absent in Seban/Slight-style code |
+| RANDOM reset | Halt both POKEYs with `SKCTL=0`, release only `$D21F`, then test whether primary `RANDOM ($D20A)` stayed at `$FF` | X=1 stereo, X=0 mono in KMK-style code |
+| Keyboard register | Compare `KBCODE ($D209)` with `$D219`; second POKEY has no keyboard scanner | Z=0 stereo, Z=1 mono, but unreliable after reset or key `L` |
+
+Prefer the RANDOM-reset or timer method for production detection. The keyboard
+method is tiny but can false-negative while the primary keyboard code is `$00`.
+Always restore primary `SKCTL`, `IRQEN`, `NMIEN`, and any timer state after the
+probe.
 
 ---
 

@@ -147,8 +147,9 @@ KMK/DLT code above uses `MEMAC_B_CTL = $4c` for cores older than 1.20. Detection
 ### FX revision read
 
 ```asm
-        ; A = original GRACTL value (caller saves/restores)
-        ; Z = 1 → Sophia present, Z = 0 → absent or Sophia 1
+        ; run after vbxe_detect
+        ; out: C=0 FX core confirmed, vb_rev=BCD revision,
+        ;      vb_rambo bit 7 set when FX 1.21+ RAMBO core is present
 
 get_fx_version
         lda   #$00

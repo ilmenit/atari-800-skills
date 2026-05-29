@@ -1,7 +1,6 @@
 # Usage
 
 ## Assembler Options
-<!-- TODO: Use active form  -->
 ```none
 Syntax: mads source [options]
 

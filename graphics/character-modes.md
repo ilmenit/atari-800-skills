@@ -1,3 +1,10 @@
+---
+name: atari8bit-character-modes
+description: >-
+  Atari ANTIC character modes: character-set memory, CHBASE/CHACTL, text and
+  multicolor layouts, sub-cell plotting, smooth scrolling, and DLI charset swaps.
+---
+
 # Character Modes
 
 ## Overview
@@ -88,6 +95,11 @@ This drives 1/4 pixel step scrolling carried by VBI without altering the display
 
 ## Advanced: OBJ-format Sub-Pixel Plot in GR.0
 
-The OBJ/2L sub-pixel plot technique achieves 80×48 effective pixel resolution within the 40×24 Graphics-0 cell grid using four pre-computed 256-byte lookup tables. Each cell is decoded not as 2×4 characters but as four sub-pixel positions — top-left, top-right, bottom-left, bottom-right — each selectable independently. The lookup tables pack the `ORA`/`EOR` combination necessary to toggle one sub-pixel within the character code bits already set. The init routine (−2−−−−8) precomputes pairings for all 256 character codes. The actual plot routine takes a 0–47 column and 0–47 row coordinate, retrieves the correct table byte from the four arrays, and ORs it into the character cell. Scrolling acceleration can be simplified but is not free.
-
-Reference procedure: a reference article on sub-pixel plotting in Graphics 0.
+The OBJ/2L sub-pixel plot technique achieves 80×48 effective pixel resolution
+within the 40×24 Graphics-0 cell grid using four pre-computed 256-byte lookup
+tables. Treat each text cell as four selectable sub-pixels: top-left,
+top-right, bottom-left, and bottom-right. The plot routine maps `x>>1,y>>1` to
+the cell address, selects one of the four tables from `(x&1,y&1)`, reads the
+current screen code, and writes back `screen_code OR table[screen_code]`.
+Clearing needs parallel AND-mask tables because an OR-only plot cannot unset a
+sub-pixel.
