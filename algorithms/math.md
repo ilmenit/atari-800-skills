@@ -15,7 +15,5 @@ Load only the focused file that matches the task.
 - [floating-point.md](math/floating-point.md) - 10.8 Floating-Point Entry
 - [atan2-log.md](math/atan2-log.md) - 10.9 Logarithmic atan2 (log2-ratio + octant adjust)
 - [sqrt-distance.md](math/sqrt-distance.md) - 10.10 Distance computation (squared-table + binary-search sqrt)
-- [multiplication.md](math/multiplication.md) - 10.1 Multiplication
-- [sqrt-distance.md](math/sqrt-distance.md) - 10.10 Distance computation (squared-table + binary-search sqrt)
 - [splines.md](math/splines.md) - 10.13 Quadratic Splines for Paths and Curves
 - [see-also.md](math/see-also.md) - See also

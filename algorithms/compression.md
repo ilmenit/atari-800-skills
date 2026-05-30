@@ -10,4 +10,3 @@ Load only the focused file that matches the task.
 - [exomizer.md](compression/exomizer.md) - 12.3 Exomizer — Adaptive Dictionary Compression
 - [deflate.md](compression/deflate.md) - 12.4 DEFLATE — zlib-compatible Bitstream
 - [selection.md](compression/selection.md) - 12.5 Low-RAM Compression Model Choice
-- [selection.md](compression/selection.md) - 12.5 Low-RAM Compression Model Choice

@@ -11,9 +11,4 @@ Load only the focused file that matches the task.
 - [character-modes.md](antic/character-modes.md) - 3.4  Character Modes (ANTIC 2–7)
 - [registers.md](antic/registers.md) - 3.5  ANTIC Register Quick-Reference ($D400–$D40F)
 - [dli-wsync.md](antic/dli-wsync.md) - 3.6  DLI — Full Reference
-- [dli-wsync.md](antic/dli-wsync.md) - 3.6  DLI — Full Reference
-- [dli-wsync.md](antic/dli-wsync.md) - 3.6  DLI — Full Reference
-- [scrolling.md](antic/scrolling.md) - 3.3  Scrolling — Coarse & Fine (2D, Hardware-Accelerated)
-- [dli-wsync.md](antic/dli-wsync.md) - 3.6  DLI — Full Reference
-- [notes.md](antic/notes.md) - 3.11  Emulator Accuracy Notes
 - [notes.md](antic/notes.md) - 3.11  Emulator Accuracy Notes

@@ -13,6 +13,11 @@ This file documents the portable "6502 Standard Macro Library" entry-point macro
 originally assembled into a single file. Each macro below is self-contained and
 expanded inline at assembly time — no runtime call overhead.
 
+For exact macro bodies and assembler-condition details, load
+[`macros/standard-macros.asm`](macros/standard-macros.asm). Keep this overview
+as the routing and usage guide; use the source file when copying or auditing a
+macro implementation.
+
 ---
 
 ## 15.1 Clear (zero-fill)
@@ -137,9 +142,10 @@ _MUL32  VLA, VLB, RES   ; 32-bit result:  X=$FF; 32 iterations
 _MUL16I VLA, NUM, RES   ; multiply VLA by compile-time constant NUM (folded shifts)
 ```
 
-`_MUL16I` compiles to zero instructions for `NUM == 1` (pure transfer), and
-for other constants decomposes `NUM` into power-of-two shifts plus additions
-at assembly time.
+`_MUL16I` emits only `_XFR16 VLA,RES` for `NUM == 1`; for other constants it
+clears `RES` and decomposes `NUM` into power-of-two shifts plus additions at
+assembly time. For `NUM == 0`, the recursive helper emits no additions after
+the initial clear.
 
 ---
 
@@ -187,7 +193,8 @@ inverts direction when `SRC > DST` to prevent overwrite corruption.
 _SET16I  NUM, DST    ; DST = NUM  (zero for NUM=0 uses _CLR16, otherwise two STA bytes)
 ```
 
-On 65SC02 a compile-time `NUM == 0` elides both bytes entirely.
+For `NUM == 0`, `_SET16I` delegates to `_CLR16`; on 65SC02 that uses `STZ`
+instead of `LDA #0` / `STA`.
 
 ---
 
@@ -242,6 +249,7 @@ For sine/cosine table generation and squared-distance helpers, use
 
 ## See also
 
+- [`macros/standard-macros.asm`](macros/standard-macros.asm) for the complete source library, including helper macros such as `__MUL16I`.
 - `.STRUCT/.PROC` macros in the MADS assembler skill — higher-level grouping built on the same `.MACRO/.ENDM` construct
 - The math-routines skill for `_MUL16` / `_DIV16` notes (signed variants and self-modifying optimisations)
 - `algorithms/optimization.md` and `algorithms/bit-ops.md` for synthetic-instruction idioms worth wrapping as local macros.

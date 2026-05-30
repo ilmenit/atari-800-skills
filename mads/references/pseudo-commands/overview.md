@@ -20,7 +20,7 @@
  [INS 'filename'["filename"][*][+-value][,+-ofset[,length]]](origin-include-data.md#ins)<br>
  [ICL 'filename'["filename"]](origin-include-data.md#icl)<br>
 
- [DTA [abfghltvmer](value1,value2...)[(value1,value2...)]](#dta)<br>
+ <a href="#dta">DTA <code>&#91;abfghltvmer&#93;&#40;value1,value2...&#41;&#91;&#40;value1,value2...&#41;&#93;</code></a><br>
  [DTA [cd]'string'["string"]](#dta_s)<br>
 
  [RUN expression](#run)<br>
