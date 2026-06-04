@@ -10,7 +10,6 @@ description: >-
 
 > **When to load:** The task is to understand, port, patch, debug, or document an existing XEX/ATR/source/listing/demo.
 > **Do not use for:** Pure register lookup; load `hardware/*` instead.
-> **Primary sources:** `atari-documentation/XEX-FORMAT/xex-format.md`, `Altirra-hardware/extracted_chapters/chapter03.md`, `chapter04.md`, `chapter09.md`, `chapter10.md`, `atari-documentation/code-examples/`, `torus-project/`.
 
 ## Quick Lookup
 
