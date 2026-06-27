@@ -72,6 +72,7 @@ This skill is self-contained. The topic files below are the available reference 
 
 - **`exotics/vbxe.md`** — VBXE FX core, detection, XDL, blitter, VRAM, palette, MEMAC windows, examples.
 - **`exotics/sophia-rapidus.md`** — Sophia video upgrades, Rapidus/65C816 notes, APE-Time RTC, LDW/CA-2001 device protocol.
+- **`exotics/fujinet.md`** — FujiNet network programming, N: device CIO handler, TCP/UDP sockets, HTTP requests, SIO protocol, and JSON parsing.
 
 ## Navigation Rules
 
