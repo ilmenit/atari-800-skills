@@ -58,15 +58,82 @@ Common addresses:
 
 ## 2. ATR and Disk Triage
 
-An ATR image is a sector container, not a filesystem by itself. First identify sector size and boot behavior.
+An ATR image is a sector container, not a filesystem by itself. First identify sector size, image structure, and boot behavior.
 
-| Item | Check |
-|---|---|
-| ATR header | `$96 $02`, 16-byte header |
-| Sector size | Usually 128 or 256 bytes; first three boot sectors are commonly treated as 128-byte sectors |
-| Boot disk | Sector 1 boot flag/count can load a boot program before DOS |
-| DOS files | Need DOS type knowledge before mapping directory entries |
-| Custom loader | Watch SIO/DCB calls and direct sector reads |
+### 2.1 ATR Header Structure (16 bytes)
+
+The ATR file starts with a 16-byte header. The magic identifier is `0x96 0x02` (representing the sum of the ASCII values of the string `'NICKATARI'`).
+
+| Offset | Type | Name | Description |
+|---|---|---|---|
+| `$00` | WORD | `wMagic` | `$96 $02` (little-endian identifier, `$0296`) |
+| `$02` | WORD | `wPars` | Image size (excluding header) in paragraphs (size in bytes / 16) |
+| `$04` | WORD | `wSecSize` | Sector size in bytes (commonly `$80` = 128, `$0100` = 256, `$0200` = 512) |
+| `$06` | WORD/BYTE | `wParsHigh`/`btParsHigh` | SIO2PC: High word of paragraphs. APE: High byte of paragraphs. |
+| `$07` | BYTE/DWORD | `dwCRC` (first byte) | APE: 32-bit file CRC (valid if bit 1 of flags at offset `$0F` is set) |
+| `$08` | BYTE | `btFlags` / `dwCRC` | SIO2PC: Flags (bit 4 = copy protected, bit 5 = write protected). APE: Part of CRC |
+| `$09` | WORD | `wBad` / `dwCRC` | SIO2PC: Number of first bad sector (if bit 4 is set). APE: Part of CRC |
+| `$0B` | DWORD | `dwUnused` / `dwUnused` | Unused bytes (usually `$00000000`) |
+| `$0F` | BYTE | `btFlags` / `btFlags` | SIO2PC: Unused. APE: Flags (bit 0 = read-only, bit 1 = dwCRC is valid) |
+
+Most commonly, ATR files follow the APE style or contain zero bytes for `$07` through `$0F`.
+
+### 2.2 Boot Sector Layouts for 256-byte (Double Density) Disks
+
+Standard Atari Double Density (DD) floppies use 256-byte sectors, but the Atari OS boot loader always reads the first three boot sectors as 128-byte sectors. ATR image creators handle this in four different ways:
+
+1. **Short (Type 2 / Standard)**
+   - **Structure:** Sectors 1–3 are stored as exactly 128 bytes each, followed immediately by 256-byte sectors.
+   - **Header Size:** `(sectors - 3) * 256 + 384` (not a multiple of 256).
+   - **Offsets:**
+     - Sectors 1–3: `Offset = 16 + (sector - 1) * 128` (Sector 1: 16, Sector 2: 144, Sector 3: 272)
+     - Sectors 4+: `Offset = 16 + 384 + (sector - 4) * 256` (Sector 4: 400, Sector 5: 656)
+
+2. **Even (Type 1)**
+   - **Structure:** Sectors 1–3 are allocated 256 bytes in the file, but only the first 128 bytes are used. The second 128 bytes are padded with zeros.
+   - **Header Size:** `sectors * 256` (multiple of 256).
+   - **Offsets:**
+     - All Sectors: `Offset = 16 + (sector - 1) * 256`
+     - Sectors 1–3: Size is 128 bytes (S1: 16–143, S2: 272–399, S3: 528–655). The ranges 144–271, 400–527, and 656–783 are padding zeros.
+     - Sectors 4+: Size is 256 bytes (S4: 784–1039, etc.).
+
+3. **Packed**
+   - **Structure:** Sectors 1–3 are stored as 128 bytes each, followed by 384 bytes of zero padding, followed by 256-byte sectors.
+   - **Header Size:** `sectors * 256` (multiple of 256).
+   - **Offsets:**
+     - Sectors 1–3: `Offset = 16 + (sector - 1) * 128` (S1: 16, S2: 144, S3: 272)
+     - Sectors 4+: `Offset = 16 + 768 + (sector - 4) * 256` (S4: 784, etc.)
+
+4. **Full**
+   - **Structure:** All sectors (including 1–3) are stored as full 256-byte sectors.
+   - **Header Size:** `sectors * 256` (multiple of 256).
+   - **Offsets:**
+     - All Sectors: `Offset = 16 + (sector - 1) * 256`
+
+#### Programmatic Layout Detection
+When parsing a DD ATR image (`wSecSize = 256`):
+1. Compute the disk size: `size = wPars * 16`.
+2. If `size % 256 != 0`, it is **Short**.
+3. If `size % 256 == 0`, read the first 768 bytes after the header:
+   - If bytes 384–767 are all zero, it is **Packed**.
+   - If bytes 128–255, 384–511, and 640–767 are all zero, it is **Even**.
+   - Otherwise, it is **Full**.
+
+### 2.3 Copy Protection & SIO2PC Bad Sectors
+
+If bit 4 of `btFlags` (offset `$08` in SIO2PC headers) is set, the ATR image contains copy-protected bad sectors starting at sector `wBad` (offset `$09`).
+For these sectors, instead of raw floppy sector data, the file contains a 16-byte metadata block simulating floppy disk timing errors and command statuses:
+
+| Offset | Type | Name | Description |
+|---|---|---|---|
+| `$00` | DWORD | `dwSign` | Signature bytes: `$C2 $1C $3D $1E` |
+| `$04` | BYTE[4] | `btaErrStatus` | SIO status response (`$53`) for a BAD read (in reverse order) |
+| `$08` | BYTE | `btCmdResp` | Command response status (`"A"` = ACK, `"N"` = NACK, or `_` / no effect) |
+| `$09` | BYTE | `btDataResp` | Data block response (`"C"` = Complete, `"A"` = ACK, `"E"` = Error) |
+| `$0A` | BYTE | `btChksumInfo` | Checksum verification state (`"G"` = Good checksum, `"B"` = Bad checksum) |
+| `$0B` | BYTE | `btResDelay` | Read/write response delay for a GOOD sector in jiffies (1/18.2 Hz) |
+| `$0C` | BYTE | `btErrResDelay` | Read response delay for a BAD sector in jiffies |
+| `$0D` | BYTE[4] | `btaStatus` | SIO status response (`$53`) for a GOOD read (in reverse order) |
 
 For game/demo reversing, boot sectors and custom SIO loaders often matter more than DOS directories. Trace `SIOV` calls and DCB fields before assuming CIO file access.
 
