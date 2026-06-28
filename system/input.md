@@ -267,6 +267,95 @@ ytable  .byte  0,  0, -1,  1,  0,  1, -1,  0
         ...                     ; accept valid PENH
 ```
 
+## 6.3 Keyboard Input
+
+Atari 8-bit computers read keyboard input through three primary paradigms: OS Shadow registers (polling-friendly), standard OS CIO calls (via the `K:` handler), or direct hardware scanning of POKEY registers (for games and bare-metal environments).
+
+### 6.3.1 OS Shadow Register Polling
+The OS maintains zero-page shadows for modifier keys and processes key presses into the `CH` shadow. 
+
+* **`CH ($02FC)`** (764): Keyboard character code shadow. It holds the processed key code or `$FF` if no new key has been pressed.
+  > [!IMPORTANT]
+  > Once a keypress is read from `CH`, you **MUST** reset it by writing `$FF` to `CH` so the OS knows the key has been processed.
+* **`SHFLG ($02F0)`** (752): Shift/Ctrl lock key status modifier shadow:
+  - Bit 6: `1` = Control key is currently held down
+  - Bit 5: `1` = Shift key is currently held down
+  - Bit 2: `1` = Control lock is active
+  - Bit 1: `1` = Shift lock is active
+
+**Polling Zero-Page Shadow Example:**
+```asm
+poll_keyboard
+        lda CH                 ; OS keyboard shadow at $02FC
+        cmp #$FF               ; $FF = no keypress
+        beq ?no_key
+        
+        pha                    ; save key code
+        lda #$FF
+        sta CH                 ; reset shadow code to acknowledge read
+        pla                    ; restore key code
+        
+        ; ... process key in accumulator ...
+?no_key rts
+```
+
+### 6.3.2 Direct Hardware Scanning (Bypassing OS)
+For custom keyboard matrix decoding or when the OS ROM is disabled, POKEY registers are polled directly:
+
+* **`KBCODE ($D209)`**: Holds the raw 8-bit keyboard matrix code.
+  - Bits 0–5: Base raw scancode (0–63).
+  - Bit 6: Shift modifier status (`1` = Shift is down / value + `$40`).
+  - Bit 7: Control modifier status (`1` = Control is down / value + `$80`).
+* **`SKSTAT ($D20F)`**: Status register.
+  - Bit 3: Keyboard key is currently pressed (`0` = key is down / real-time feedback).
+  - Bit 2: Keyboard over-run (`0` = key pressed before previous was read).
+* **`SKCTL ($D20F)`**: Control register (Write-only).
+  - Writing `$03` enables both the keyboard scanner and debounce logic (required for hardware polling).
+
+**Direct Hardware Reading Example:**
+```asm
+init_keyboard_hardware
+        lda #$03
+        sta SKCTL              ; enable keyboard scan and debounce logic
+        rts
+
+poll_key_hardware
+        lda SKSTAT             ; read POKEY status
+        and #$08               ; mask bit 3 (key down state, active low)
+        bne ?no_keypress       ; if bit 3 is 1, no key is currently held down
+        
+        lda KBCODE             ; read raw scancode
+        cmp KBCODE             ; compare to ensure stability
+        bne poll_key_hardware   ; repeat if not matching (debounce check)
+        
+        ; A now holds raw 8-bit scancode (including shift/ctrl bits)
+        rts
+?no_keypress
+        lda #$FF               ; return $FF indicating no keypress
+        rts
+```
+
+### 6.3.3 Keyboard Scancodes Mapping Table
+The base raw scancodes (bits 0–5 of `KBCODE`, unshifted/uncontrolled) map to standard keyboard keys as follows:
+
+| Code | Key | Code | Key | Code | Key | Code | Key |
+|---|---|---|---|---|---|---|---|
+| `$00` | L | `$10` | V | `$20` | , | `$30` | 9 |
+| `$01` | J | `$11` | HELP | `$21` | SPACE | `$31` | 0 |
+| `$02` | ; | `$12` | C | `$22` | . | `$32` | 7 |
+| `$03` | F1 (XL/XE) | `$13` | F3 (XL/XE) | `$23` | N | `$33` | BACKSPACE |
+| `$04` | F2 (XL/XE) | `$14` | F4 (XL/XE) | `$24` | M | `$34` | 8 |
+| `$05` | K | `$15` | B | `$25` | / | `$35` | < |
+| `$06` | + | `$16` | X | `$26` | INVERSE | `$36` | > |
+| `$07` | * | `$17` | Z | `$27` | - | `$37` | F |
+| `$08` | O | `$18` | 4 | `$28` | R | `$38` | H |
+| `$09` | P | `$19` | 3 | `$29` | E | `$39` | D |
+| `$0A` | U | `$1A` | 6 | `$2A` | Y | `$3A` | CAPS LOCK |
+| `$0B` | RETURN | `$1B` | ESCAPE | `$2B` | TAB | `$3B` | G |
+| `$0C` | I | `$1C` | 5 | `$2C` | T | `$3C` | S |
+| `$0D` | - | `$1D` | 2 | `$2D` | W | `$3D` | A |
+| `$0E` | = | `$1E` | 1 | `$2E` | Q | | |
+
 ---
 
 *All register maps, timing constants and code snippets are self-contained in this file; PIA port details in `system/memory-map.md`.*

@@ -29,14 +29,15 @@ Assembler/source implications:
 
 | Field | Value |
 |---|---|
-| ATR magic | `$96 $02` header size = 0x80 bytes |
-| Sector size | 128 bytes (SD) or 256 bytes (DD) |
-| Sector count | (file size − header_size) / sector_size |
+| ATR magic | `$96 $02` (little-endian: `$0296`); Header size = 16 bytes (`0x10`) |
+| Sector size | 128 bytes (SD), 256 bytes (DD), or 512 bytes |
+| Sector count | SD/512B: `(file size − 16) / sector_size`<br>DD Short layout: `(file size − 384 − 16) / 256 + 3`<br>DD Full/Even/Packed: `(file size − 16) / 256` |
 | Double-sided (1050) | 180K → 720 KB (360 Tracks × 16 Sectors × 256 × 2 sides) |
 
 Boot and loader notes:
 
 - The first three sectors are commonly 128-byte boot sectors even on enhanced-density images.
+- See [reversing.md](../../tooling/reversing.md#2-atr-and-disk-triage) for detailed 16-byte header layouts, offset calculations for Short/Even/Packed/Full DD layouts, and copy protection specs.
 - Boot disks may load code before any DOS filesystem is active.
 - Custom loaders often bypass CIO and call `SIOV` with direct sector commands.
 - Directory entries are DOS-dependent; do not infer MyDOS/SpartaDOS/DOS 2.x layout without identifying the DOS.
