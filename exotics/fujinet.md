@@ -10,13 +10,14 @@ FujiNet is a multi-peripheral emulator and network adapter for vintage systems. 
 ## 1. FujiNet Architecture
 
 ### Device IDs and Addresses
-- **$70 (FujiNet Control Device):** Used for configuration, WiFi scanning, SSID setups, and TNFS disk mounting.
+- **$70 (FujiNet Control Device):** Used for configuration, WiFi scanning, SSID setups, TNFS host and disk mounting, directory browser, app-key storage, Base64/Hash/QR utility operations.
 - **$71–$78 (FujiNet Network Devices - `N1:` to `N8:`):** Allocated for network socket and stream operations. Standard `N:` defaults to unit 1 (`N1:`, ID `$71`).
 - **$50–$53 (FujiNet R: Devices - `R1:` to `R4:`):** Serial/Modem emulation interface.
+- **$45 (Clock / APETime Device):** Emulates the APETime clock, providing date and time in various formats.
 
 ### Communication Vectors
 1. **CIO (Central Input/Output):** Recommended for most programs. Accessed using the OS `CIOV` vector (`$E456`) and the `N:` device handler.
-2. **SIO (Serial Input/Output):** Directly bypasses the CIO handler using the `SIOV` vector (`$E459`). Essential if the resident DOS or application overwrites the `N:` handler memory space.
+2. **SIO (Serial Input/Output):** Directly bypasses the CIO handler using the `SIOV` vector (`$E459`). Essential if the resident DOS or application overwrites the `N:` handler memory space or when reaching the Control `$70` or Clock `$45` devices which are SIO-only.
 
 ---
 
@@ -29,28 +30,58 @@ Standard network operations are mapped to the Atari's Input/Output Control Block
 - `ICBAL`/`ICBAH` (`$0344` / `$0345`): Buffer Address (pointer to URI/data).
 - `ICBLL`/`ICBLH` (`$0348` / `$0349`): Buffer Length (for read/write operations).
 - `ICAX1` (`$034A`): Open Mode.
-- `ICAX2` (`$034B`): Auxiliary 2 (Translation / Protocol Flags).
+- `ICAX2` (`$034B`): Auxiliary 2 (Translation Mode).
 
 ### Connection Modes (`ICAX1`)
 When executing an `OPEN` command (`$03`), set `ICAX1` according to the required network mode:
-- **`$04` (Read):** Read-only client connection.
-- **`$08` (Write):** Write-only client connection.
-- **`$0C` (Update / Read+Write):** Bidirectional client socket (standard TCP/UDP/HTTP).
-- **`$09` (Listen):** Server mode. Listens for incoming connections on the specified port.
+- **`$04` (Read):** Read-only client connection (HTTP GET, socket read).
+- **`$06` (Directory Read):** Used to read file/directory lists.
+- **`$08` (Write):** Write-only client connection (HTTP PUT, socket write).
+- **`$09` (Append):** Append to existing file.
+- **`$0C` (Update / Read+Write):** Bidirectional client socket (standard TCP/UDP/HTTP), also used for TCP Listen Server.
+- **`$0D` (HTTP POST):** Open connection for posting payloads.
+- **`$05` (HTTP DELETE):** Request resource deletion.
 
 ### Line Translation Options (`ICAX2`)
-FujiNet can translate carriage returns and line feeds on the fly to match Atari ATASCII EOL (`$9B`):
-- **`$00` (Raw Mode):** No translation (essential for binary data, TCP raw streams, UDP packets).
-- **`$01` (LF Mode):** LF translated to EOL (`$9B`).
-- **`$02` (CR Mode):** CR translated to EOL.
-- **`$03` (CR/LF Mode):** CR/LF sequence translated to EOL.
+FujiNet translates carriage returns and line feeds dynamically to match Atari's EOL character (`$9B`):
+- **`$00` (Raw/Binary Mode):** No translation (essential for binary transfers, raw TCP, UDP datagrams).
+- **`$01` (CR Mode):** Carriage Return (`$0D`) translated to EOL (`$9B`).
+- **`$02` (LF Mode):** Line Feed (`$0A`) translated to EOL (`$9B`).
+- **`$03` (CR/LF Mode):** CR/LF sequence (`$0D$0A`) translated to EOL (`$9B`).
 
 ### Protocol URIs
 The filename passed to the `OPEN` command determines the protocol and endpoint:
 - **TCP Client:** `N:TCP://<host>:<port>/`
-- **TCP Server:** `N:TCP://:<port>/`
+- **TCP Server:** `N:TCP://:<port>/` (No host specifies a listening server socket)
 - **UDP Client:** `N:UDP://<host>:<port>/`
 - **HTTP/HTTPS:** `N:HTTP://<host>[:port]/<path>` or `N:HTTPS://...`
+
+### CIO / XIO Special Commands
+For operations beyond reading and writing, CIO special commands are sent via `XIO cmd,#ch,aux1,aux2,"Nx:..."`. 
+*Note: The XIO command number is identical to the SIO command byte.*
+
+| XIO Cmd | SIO Cmd (Hex) | Char | Description |
+|:---:|:---:|:---:|---|
+| **15** | — | — | Flush NDEV transmit buffer immediately (handled locally by NDEV) |
+| **32** | `$20` | ` ` | Rename file. Filespec format: `"Nx:from_name,to_name"` |
+| **33** | `$21` | `!` | Delete file |
+| **35** | `$23` | `#` | Lock file (make read-only) |
+| **36** | `$24` | `$` | Unlock file |
+| **42** | `$2A` | `*` | Make directory |
+| **43** | `$2B` | `+` | Remove directory |
+| **44** | `$2C` | `,` | Change directory (sets active path prefix for the channel) |
+| **48** | `$30` | `0` | Get current directory (reads active path prefix back) |
+| **65** | `$41` | `A` | TCP: Accept waiting client on listening channel |
+| **68** | `$44` | `D` | UDP: Set destination `"host:port"` for outgoing packets |
+| **80** | `$50` | `P` | JSON: Parse JSON document just read |
+| **81** | `$51` | `Q` | JSON: Query path (value becomes readable via standard inputs) |
+| **84** | `$54` | `T` | Set translation mode (aux2 = 0/1/2/3) |
+| **90** | `$5A` | `Z` | Set interrupt/status poll rate (aux1 = rate low, aux2 = rate high) |
+| **99** | `$63` | `c` | TCP: Close current client, keep listening |
+| **251** | `$FB` | — | Set JSON parameter (aux1 selects parameter index) |
+| **252** | `$FC` | — | Set channel mode (aux2: 0 = protocol, 1 = JSON) |
+| **253** | `$FD` | — | Set username (for FTP, SMB) before opening connection |
+| **254** | `$FE` | — | Set password (for FTP, SMB) before opening connection |
 
 ---
 
@@ -74,13 +105,13 @@ For custom handlers or bare-metal execution, use standard SIO command blocks via
 ### SIO Device Control Block (DCB) Structure
 | Address | Name | Description |
 |---|---|---|
-| `$0300` | `DDEVID` | SIO Device ID (`$71`–`$78` for `N1:`–`N8:`, `$70` for Control) |
+| `$0300` | `DDEVID` | SIO Device ID (`$71`–`$78` for `N1:`–`N8:`, `$70` for Control, `$45` for Clock) |
 | `$0301` | `DUNIT`  | Device Unit (typically `$01`) |
 | `$0302` | `DCOMND` | SIO Command byte |
-| `$0303` | `DSTATS` | Status/Direction (`$40` = Read, `$80` = Write, `$00` = No data) |
+| `$0303` | `DSTATS` | Before call: Data Direction (`$40` = Read, `$80` = Write, `$00` = No data). After call: Result code. |
 | `$0304` | `DBUFLO` | Data Buffer Address (Low) |
 | `$0305` | `DBUFHI` | Data Buffer Address (High) |
-| `$0306` | `DTIMLO` | Timeout (seconds, e.g., `$0F`) |
+| `$0306` | `DTIMLO` | Timeout (seconds, e.g., `$1F` = 31 seconds is recommended) |
 | `$0308` | `DBYTLO` | Bytes to Transfer (Low) |
 | `$0309` | `DBYTHI` | Bytes to Transfer (High) |
 | `$030A` | `DAUX1`  | Auxiliary Byte 1 (parameters specific to command) |
@@ -89,52 +120,102 @@ For custom handlers or bare-metal execution, use standard SIO command blocks via
 ### SIO Commands for Device ID $70 (FujiNet Control)
 Device `$70` handles configuration, WiFi settings, local time, and TNFS slot mounting.
 
-| Command | Hex | Description |
-|:---:|:---:|---|
-| `Test` | `$00` | Check if FujiNet is online |
-| `Get HSIO Index` | `$3F` | Reads current High-Speed SIO rate |
-| `Get Time` | `$D2` | Fetches current date/time from NTP |
-| `Random Number` | `$D3` | Generates hardware random bytes from ESP32 |
-| `Disable/Enable Device` | `$D4`/`$D5` | Hardware peripheral slot activation |
-| `Get Device Slot Filename`| `$DA` | Queries mounted disk filename |
-| `Open/Close App Key` | `$DC`/`$DB` | Access local key-value config store |
-| `Read/Write App Key` | `$DD`/`$DE` | Read/Write custom config parameters |
-| `Unmount Device Image` | `$E9` | Ejects virtual disk slot |
-| `Scan Networks` | `$FD` | Requests WiFi scan |
-| `Get Scan Result` | `$FC` | Reads WiFi SSIDs list |
-| `Set SSID and Connect` | `$FB` | Sets network and connects |
-| `Get WiFi Status` | `$FA` | Queries connection status |
-| `Mount Host` / `Unmount Host` | `$F9` / `$E6` | Mounts remote TNFS directory |
-| `Mount Device Image` | `$F8` | Mounts remote ATR/XEX file |
-| `Open/Read/Close Directory` | `$F7`/`$F6`/`$F5` | TNFS remote directory listing |
-| `Reset FujiNet` | `$FF` | Performs cold reboot of ESP32 |
+| Command | Hex | Direction | Parameters & Payload Details |
+|:---:|:---:|:---:|---|
+| `Test` | `$00` | `$00` | Check if FujiNet is online |
+| `Scan Networks` | `$FD` | `$40` | Kick off scan. Reads 1 byte (count of APs found). |
+| `Get Scan Result` | `$FC` | `$40` | `DAUX1` = AP index (0-based). Reads 33 bytes (32-byte SSID + 1-byte signed RSSI). |
+| `Set SSID` | `$FB` | `$80` | `DAUX1` = 1 (save to config). Payload: SSID (32 bytes) + Password (64 bytes). |
+| `Get SSID` | `$FE` | `$40` | Reads 96 bytes (SSID + Password) of stored network. |
+| `Get WiFi Status` | `$FA` | `$40` | Reads 1 byte: `3` = connected, `6` = not connected. |
+| `Get Adapter Config` | `$E8` | `$40` | Reads 139 bytes of layout: SSID (32), hostname (64), local IP (4), gateway (4), netmask (4), DNS (4), MAC (6), BSSID (6), firmware version string (15). |
+| `Read Host Slots` | `$F4` | `$40` | Reads 256 bytes (8 × 32-byte host slot names). |
+| `Write Host Slots`| `$F3` | `$80` | Sends 256 bytes (8 × 32-byte host slot names) to configure slots. |
+| `Read Device Slots`| `$F2` | `$40` | Reads 304 bytes (8 × 38-byte slot array). Record is: host slot (1), mode (1: 1=RO, 2=RW), filename (36). |
+| `Write Device Slots`| `$F1`| `$80` | Sends 304 bytes (8 × 38-byte slot array). |
+| `Mount Host` | `$F9` | `$00` | `DAUX1` = host slot to mount. |
+| `Unmount Host` | `$E6` | `$00` | `DAUX1` = host slot to unmount. |
+| `Mount Image` | `$F8` | `$00` | `DAUX1` = disk slot, `DAUX2` = mode (1 = RO, 2 = RW). |
+| `Unmount Image` | `$E9` | `$00` | `DAUX1` = disk slot. |
+| `Mount All` | `$D7` | `$00` | Mounts all configured slots. |
+| `Set Dev Filename`| `$E2` | `$80` | `DAUX1` = slot, `DAUX2` = `(host << 4) \| mode`. Payload = filename. |
+| `Get Dev Filename`| `$A0–$A7`| `$40` | `$A0 + slot` (0 to 7) queries and reads the path back. |
+| `New Blank Disk` | `$E7` | `$80` | Payload (262 bytes): sector count (2), sector size (2: 128/256/512), host slot (1), disk slot (1), filename (256). |
+| `Open Directory` | `$F7` | `$80` | `DAUX1` = host slot. Payload: path + NUL + optional filter. |
+| `Read Dir Entry` | `$F6` | `$40` | `DAUX1` = max len, `DAUX2` = flags (`$80` appends packed date/size/flags). Reads one entry (first byte `$7F` is EOF). |
+| `Close Directory`| `$F5` | `$00` | Closes active directory browser session. |
+| `Get Position` | `$E5` | `$40` | Reads current directory position (2 bytes) for paging. |
+| `Set Position` | `$E4` | `$00` | `DAUX1`/`DAUX2` = position to seek to. |
+| `Open App Key` | `$DC` | `$80` | Payload (5 bytes): creator id (2, low first), app id (1), key id (1), mode (1: 0=Read, 1=Write). |
+| `Write App Key` | `$DE` | `$80` | `DAUX1`/`DAUX2` = length (up to 64 bytes). Payload: data bytes. |
+| `Read App Key` | `$DD` | `$40` | Reads 2-byte length followed by data bytes. |
+| `Close App Key` | `$DB` | `$00` | Closes active key. |
+| `Get Time` | `$D2` | `$40` | Reads 7-byte binary date/time: century (1), year (1), month (1), day (1), hour (1), minute (1), second (1). |
+| `Random Number` | `$D3` | `$40` | Reads 4 hardware-generated random bytes. |
+| `GUID Gen` | `$BB` | `$40` | Reads 36-character GUID string. |
+| `Disable CONFIG Boot`| `$D9`| `$00` | `DAUX1` = 0/1 to disable/enable CONFIG boot. |
+| `Set Boot Mode` | `$D6` | `$00` | `DAUX1` = boot mode. |
+| `Enable Device` | `$D5` | `$00` | `DAUX1` = SIO device ID to enable. |
+| `Disable Device` | `$D4` | `$00` | `DAUX1` = SIO device ID to disable. |
+| `Device Status` | `$D1` | `$40` | Reads 1 byte showing enabled status. |
+| `Copy File` | `$D8` | `$80` | Copies file between hosts. Payload = source and destination slots + specs. |
+| `Set Baud Rate` | `$EB` | `$00` | `DAUX1` = index (0 = 19200 ... 6 = 921600). |
+| `Set HSIO Index` | `$E3` | `$00` | `DAUX1` = HSIO rate index, `DAUX2` = 1 to save. |
+| `Reset FujiNet` | `$FF` | `$00` | Performs hardware reboot of the ESP32. |
+
+#### App Key / Hash / Base64 / QR Code Families
+- **Hash commands:** `$C8` input, `$C7` compute, `$C6` length, `$C5` output, `$C2` clear. Hash algorithm is passed in the byte after `$C7` (0 = MD5, 1 = SHA-1, 2 = SHA-256, 3 = SHA-512).
+- **Base64 encode:** `$D0` input, `$CF` compute, `$CE` length, `$CD` output.
+- **Base64 decode:** `$CC` input, `$CB` compute, `$CA` length, `$C9` output.
+- **QR Code:** `$BC` input, `$BD` encode, `$BE` length, `$BF` output (reads raw QR bitmap bytes).
 
 ### SIO Commands for Device IDs $71 to $78 (Network/N: Devices)
 Used to directly control individual sockets and network streams.
 
-| Command | Char | Hex | Description |
-|:---:|:---:|:---:|---|
-| `Open` | `'O'` | `$4F` | Open network connection (URI payload) |
-| `Close` | `'C'` | `$43` | Close network connection |
-| `Read` | `'R'` | `$52` | Read bytes from socket |
-| `Write` | `'W'` | `$57` | Write bytes to socket |
-| `Status` | `'S'` | `$53` | Returns connection status & waiting bytes (4-byte packet) |
-| `Get Error` | `'E'` | `$45` | Returns detailed error string |
-| `Parse JSON` | `'P'` | `$50` | Instructs ESP32 to parse downloaded JSON data |
-| `Query JSON` | `'Q'` | `$51` | Queries path in parsed JSON |
-| `Set Translation` | `'T'` | `$54` | Changes line endings translation mode |
-| `Rename File` | | `$20` | Network file system rename |
-| `Delete File` | | `$21` | Network file system delete |
-| `Change Directory` | | `$2C` | Change directory on host |
-| `Get Current Directory`| | `$30` | Get current directory path |
-| `Set Channel Mode` | | `$FC` | Configure protocol options / JSON parsing modes |
-| `Query Special Cmd` | | `$FF` | Queries support for protocol-specific extensions |
+| Command | Char | Hex | Direction | Description |
+|:---:|:---:|:---:|:---:|---|
+| `Open` | `'O'` | `$4F` | `$80` | Open network connection. `DAUX1` = mode, `DAUX2` = trans. Payload: 256-byte padded URI. |
+| `Close` | `'C'` | `$43` | `$00` | Close network connection. |
+| `Read` | `'R'` | `$52` | `$40` | Read bytes. `DAUX1/2` = 16-bit count (low/high). `DBYT` = count. *Must check STATUS first.* |
+| `Write` | `'W'` | `$57` | `$80` | Write bytes. `DAUX1/2` = 16-bit count. `DBYT` = count. |
+| `Status` | `'S'` | `$53` | `$40` | Channel status. Reads 4 bytes: `0-1` bytes waiting, `2` connection up (1/0), `3` error code. |
+| `Get Error` | `'E'` | `$45` | `$40` | Returns detailed error string. |
+| `Parse JSON` | `'P'` | `$50` | `$00` | Instructs ESP32 to parse downloaded JSON data. |
+| `Query JSON` | `'Q'` | `$51` | `$80` | Queries path in parsed JSON. Payload: JSONPath query string. `DAUX2` = trans. |
+| `Set Translation` | `'T'` | `$54` | `$00` | Changes translation mode via `DAUX2` (0/1/2/3). |
+| `Set Channel Mode` | | `$FC` | `$00` | Configure channel mode (`DAUX2`: 0 = protocol, 1 = JSON). |
+| `Set Interrupt Rate`| `'Z'` | `$5A` | `$00` | Set status poll interrupt rate in ms via `DAUX1` (low) / `DAUX2` (high). |
+| `Username` | | `$FD` | `$80` | Set username credential payload before `OPEN`. |
+| `Password` | | `$FE` | `$80` | Set password credential payload before `OPEN`. |
+| `Rename File` | | `$20` | `$80` | Network filesystems: rename file (Payload: `"from,to"`). |
+| `Delete File` | | `$21` | `$80` | Network filesystems: delete file (Payload: spec). |
+| `Lock File` | `'#'` | `$23` | `$80` | Network filesystems: lock file (read-only). |
+| `Unlock File` | `'$'` | `$24` | `$80` | Network filesystems: unlock file. |
+| `Make Directory` | `'*'` | `$2A` | `$80` | Network filesystems: make directory. |
+| `Remove Directory`| `'+'` | `$2B` | `$80` | Network filesystems: remove directory. |
+| `Change Directory` | `','` | `$2C` | `$80` | Network filesystems: change active directory (Payload: new path). |
+| `Get Current Dir` | `'0'` | `$30` | `$40` | Network filesystems: read current active path prefix into `DBUF`. |
+| `Inquire Direction`| | `$FF` | `$40`/`$80`| Ask what direction a command uses. `DAUX1` = command. Returns 1 byte. |
 
 #### Protocol-Specific Extensions
-- **TCP Accept (`'A'` / `$41`):** Accept incoming server client.
-- **TCP Close Client (`'c'` / `$63`):** Terminates client connection.
+- **TCP Accept (`'A'` / `$41`):** Accept incoming server client on listening socket.
+- **TCP Close Client (`'c'` / `$63`):** Terminates client connection while keeping the server socket listening.
 - **UDP Destination (`'D'` / `$44`):** Sets target IP/port for outgoing UDP packets.
-- **HTTP Mode (`'M'` / `$4D`):** Sets HTTP specific flags (such as raw headers mode).
+- **UDP Get Remote (`'r'` / `$72`):** Reads the address of the last datagram's sender into `DBUF`. (SIO only).
+
+---
+
+### SIO Commands for Device ID $45 (Clock / APETime Device)
+FujiNet emulates the APETime clock at SIO bus ID `$45`. It offers the current NTP time pre-formatted in various formats depending on the command byte.
+
+| Command | Hex | Direction | Description |
+|:---:|:---:|:---:|---|
+| `Get APETime Binary` | `$93` | `$40` | Reads 6 bytes: `Day Month Year Hour Minute Second` (binary). |
+| `Get Atari Binary` | `$41` (`'A'`) | `$40` | Reads Atari OS-native binary time format. |
+| `Get ISO Local` | `$49` (`'I'`) | `$40` | Reads ISO-8601 local time string. |
+| `Get ISO UTC` | `$5A` (`'Z'`) | `$40` | Reads ISO-8601 UTC time string. |
+| `Get ProDOS Time` | `$50` (`'P'`) | `$40` | Reads ProDOS format date/time. |
+| `Set Time Zone` | `$99` | `$80` | Sends timezone definition string. |
 
 ---
 
@@ -155,9 +236,11 @@ When programming HTTP clients using the `N:` handler, the ESP32 manages TLS/SSL 
 
 ### HTTP Open Modes
 Using `OPEN #iocb, mode, aux2, "N:HTTP://..."`:
-- **Mode 12 (`ICAX1` = `$0C`):** Standard HTTP GET.
+- **Mode 4 (`ICAX1` = `$04`):** Standard HTTP GET (read-only).
+- **Mode 12 (`ICAX1` = `$0C`):** Standard HTTP GET / read-write socket.
 - **Mode 13 (`ICAX1` = `$0D`):** HTTP GET/POST with raw header management. Setting headers requires using `PUT` commands to send headers before fetching payload.
-- **Aux2 (`ICAX2`):** Sets EOL translations (typically `3` for CR/LF to EOL).
+- **Mode 5 (`ICAX1` = `$05`):** HTTP DELETE.
+- **Aux2 (`ICAX2`):** Sets EOL translations (typically `2` for LF to EOL or `3` for CR/LF to EOL).
 
 ### Using HTTP/HTTPS from BASIC
 ```basic
@@ -552,6 +635,9 @@ A standard "NetCat" pattern in Atari BASIC connects to a TCP endpoint and create
 ### Connection Timeouts
 Network operations depend on external servers. Set appropriate SIO timeouts (default is usually 7 seconds). For long HTTP requests, ensure the timeout is extended by modifying `DTIMLO` (`$0306`) in raw SIO blocks, or use non-blocking status queries.
 
+### NDEV 128-Byte Receive Cap
+The resident `N:` handler (NDEV) receive and transmit buffers are 128 bytes each, and NDEV caps a single read at 127 bytes. While high-level programs using `INPUT` or `GET` inside loops do not notice this (the handler automatically loops to read incoming streams), it means NDEV cannot return a large block (e.g. 512 bytes) in a single CIO call. For high-speed bulk data transfers, direct SIO reads (`$52` on the low road) bypass this buffer limit and are significantly faster.
+
 ### Page boundaries and SIO Buffers
 Like all Atari SIO transactions, direct SIO buffers passed to `DBUFLO/DBUFHI` should avoid crossing page boundaries if executing under systems with custom SIO software that requires strict timing alignment.
 
@@ -603,3 +689,43 @@ When programming bare-metal SIO (`$E459`), it is easy to make assumptions that l
 > [!TIP]
 > **Gotcha #3: SIO `$00` Bytes and Atari "Hearts"**
 > If you are using CIO's `PUT RECORD` (`CMD_PUTREC` = `$09`) to print diagnostic text to the screen (`E:`), strings must be terminated by the ATASCII EOL character (`$9B`). If you accidentally terminate strings with C-style NULL (`$00`), the `PUT RECORD` routine will not stop at the NULL. Instead, it prints `$00`, which translates to the internal display code `0` - the famous **Atari Heart (♥)** symbol! Always terminate display strings in Assembly with `$9B`.
+
+---
+
+## 12. FujiNet & SIO Error Codes Reference
+
+### OS SIO Result Codes (in `DSTATS` / `$0303`)
+After executing an SIO command via `SIOV` (`$E459`), `DSTATS` will contain the SIO result. A value with the high bit set ($\ge 128$) indicates an error.
+
+| Code | Hex | Description |
+|:---:|:---:|---|
+| **1** | `$01` | **SUCCESS** - Command completed successfully |
+| **138** | `$8A` | **TIMEOUT** - Device timed out (no response on the bus) |
+| **139** | `$8B` | **NAK** - Device NAK (the frame was refused by the peripheral) |
+| **143** | `$8F` | **BAD FRAME** - Checksum mismatch |
+| **144** | `$90` | **DEVICE ERROR** - FujiNet signaled a device error. You must issue a Network `STATUS` (`$53`) command to read the extended error code. |
+
+### FujiNet Extended Device-Status Error Codes
+When `DSTATS` returns `144` (or `PEEK(749)` / `DVSTAT+3` under NDEV), query the channel status and read byte 3 of the status payload to get the exact error code:
+
+| Code | Name | Description |
+|:---:|---|---|
+| **1** | `SUCCESS` | No error occurred. |
+| **136** | `END OF FILE` | The resource has been fully read (Normal completion). |
+| **144** | `GENERAL` | A fatal device error occurred on the ESP32. |
+| **146** | `NOT IMPLEMENTED` | The command is unknown to the handler/peripheral. |
+| **151** | `FILE EXISTS` | Directory creation or file creation failed because the item already exists. |
+| **162** | `NO SPACE` | Storage space is full. |
+| **165** | `INVALID DEVICESPEC` | The network device URI spec could not be parsed. |
+| **167** | `ACCESS DENIED` | Permission refused by host or server. |
+| **170** | `FILE NOT FOUND` | File or directory not found (equivalent to network 404). |
+| **200** | `CONNECTION REFUSED` | The remote host refused the connection or is unreachable. |
+| **201** | `NETWORK UNREACHABLE` | No routing path is available to the destination host. |
+| **202** | `SOCKET TIMEOUT` | The TCP/UDP socket connection timed out. |
+| **203** | `NETWORK DOWN` | The FujiNet WiFi link is disconnected or down. |
+| **204** | `CONNECTION RESET` | The connection was reset/terminated by the remote host. |
+| **207** | `NOT CONNECTED` | Attempted an I/O operation on a closed network channel. |
+| **208** | `SERVER NOT RUNNING` | A listening server socket returned no data or client closed. |
+| **212** | `BAD USER / PASSWORD` | Authentication credentials were rejected by host. |
+| **213** | `CANNOT PARSE JSON` | The received document is not valid JSON. |
+| **255** | `NO BUFFERS` | ESP32 memory exhaustion: no allocation buffers available. |
