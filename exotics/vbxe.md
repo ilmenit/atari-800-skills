@@ -101,7 +101,16 @@ VBXE registers at `$D600` (slot 0) or `$D700` (slot 1) block.
 
 > x = 6 or 7 depending on which page VBXE is decoded at.
 
-**GTIA emu core** (`CORE_VERSION = $11`): `$Dx40–$Dx48`, `$Dx4A` are write; rest read as `$FF`.
+**GTIA emu core**: `$Dx40–$Dx48`, `$Dx4A` are write; rest read as `$FF`.
+
+> **Test the LOW NIBBLE, never the whole byte.** `CORE_VERSION` is two
+> nibbles: the low one identifies the core (**0 = full FX**, non-zero =
+> the GTIA-only core) and the high one is the major version. A full FX
+> 1.26 core reads **`$10`**, so comparing the whole byte against `$11`
+> mistakes every real FX core for a GTIA-only one. Detect with
+> `(core & $0F) == 0`, then take the major version as `core >> 4`.
+> (Altirra's manual gives `$11`, which contradicts its own bit table;
+> hardware and Altirra itself both read `$10`.)
 
 ---
 
