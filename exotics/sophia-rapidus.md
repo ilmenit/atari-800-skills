@@ -1,13 +1,14 @@
 ---
 name: atari8bit-peripherals
 description: >-
-  Sophia GTIA replacement card, APE-Time RTC, LDW Super 2000/CA-2001 SIO Z80 peripheral on Atari 8-bit.
+  Sophia GTIA replacement card, Rapidus 65C816 accelerator, APE-Time RTC,
+  LDW Super 2000/CA-2001 SIO Z80 peripheral on Atari 8-bit.
 ---
 # 16 — Peripheral Exotics & Misc Hardware
 
 > LDW Super 2000 / CA-2001 programming guide (EN) — content fully self-contained.
 > **Primary sources:** `Atariki/articles/sophia.md`, `wykrycie_sophii.md`, `ape_time.md`, `programowanie_stacji_ldw_super_2000_i_ca-2001.md`, plus Altirra hardware reference notes.
-> **Scope:** Sophia GTIA replacement (A/B/C + Sophia 2), APE-Time RTC (SIO $45/$93), LDW Super 2000/CA-2001 (SIO $58 Z80)
+> **Scope:** Sophia GTIA replacement (A/B/C + Sophia 2), Rapidus 65C816 accelerator, APE-Time RTC (SIO $45/$93), LDW Super 2000/CA-2001 (SIO $58 Z80)
 > **Key items:** GRACTL $D01D SPCEN bit7; SOPHIA $D01E signature; APE DCB $45/$01/$93; LDW $58 Z80 @$7F00
 
 ## Quick-lookup
@@ -21,6 +22,9 @@ description: >-
 | LDW Super 2000/CA-2001: SIO $58 upload + execute | §16.3 |
 | LDW Z80 ROM functions $00\u2013$14 at $0004 | §16.3 |
 | LDW I/O port table $0/$1\u2013$E/$F | §16.3 |
+| Rapidus: $D190\u2013$D1A0 registers, $FF0080 file, signature | §16.4 |
+| Rapidus: switching to the '816 resets the CPU | §16.4 |
+| Rapidus: fast RAM blocks hide EXTSEL, so MEMAC vanishes | §16.4 |
 
 ---
 
@@ -195,4 +199,74 @@ Same DCMND `$58`, but `DBUFA` → data buffer, `DSBY` = expected result byte cou
 
 ---
 
-*All facts are self-contained in this file. Reference articles covering Sophia, Sophia II, APE-Time RTC, and LDW Super 2000/CA-2001 — content fully embedded in this file.
+---
+
+## 16.4 Rapidus 65C816 accelerator
+
+Read from Altirra's emulation source (`rapidus.cpp`, `h/rapidus.h`) and
+confirmed against a real 130XE fitted with Rapidus, Ultimate 1MB and VBXE.
+
+| Resource | Value |
+|---|---|
+| CPU | 65C816, 11x base (~20 MHz), or 23x (~40 MHz) via `devices.rapidus.40mhz` |
+| Flash | 512 KB |
+| SRAM | 512 KB / 1 MB, windowed over `$0000-$FFFF`, write-through |
+| SDRAM | **14.5 MB linear at `$080000-$EFFFFF`** |
+| Banked SDRAM | 4 x 4 MB at `$800000-$BFFFFF` |
+| Signature | `"6S9038E "` at `$FF0000` |
+
+**Page-$D1 registers:** `$D190` FPGA bank - `$D191` FPGA config
+(**bit 6 = CPU select; clearing it switches to the '816**) - `$D192` config
+data - `$D193` signal disable - `$D1A0` MCR (65C816 only).
+
+**Bank-$FF register file:** MCR `$FF0080` - CMCR `$81` - SCR `$82`
+(bit 7 disables the 4K cache) - AR `$83` - 6502CR `$84` (bit 1 = back to
+6502) - HPCR `$90`.
+
+### Traps
+
+- **It always cold-boots as a 6502, and switching the CPU RESETS it.** A
+  program cannot switch and keep running; it has to arrive *after* the
+  switch, through the boot path. `BOOT` cold-resets and silently undoes a
+  prior switch.
+- **A bare `clc; xce` is fatal.** Native mode moves the interrupt vectors
+  (NMI `$FFEA`, IRQ `$FFEE`) and the Atari OS ROM fills only the
+  emulation-mode ones, so the first VBI derails the machine. Disable
+  NMI/IRQ in emulation mode first.
+- **Fast RAM hides the motherboard bus.** Each 16 KB block is independently
+  *No speed-up* / *Fast read* / *Fast read-write*. A block in fast
+  read-write never reaches the bus, so EXTSEL never fires and **a VBXE
+  MEMAC window in that block is invisible**. Keep the window's block slow;
+  CPU-to-VRAM transfer then runs at ~1.79 MHz whatever the core speed.
+- **Bank `$00` defaults to the 1.79 MHz bus (`MCR = $FF`)**, 16 KB window by
+  16 KB window. Under a small data model that is where globals, the stack
+  and the direct page live, so a program can run its *data* at stock speed
+  while believing it is accelerated. Nothing about correctness reveals it.
+- **DS1305 RTC timing:** bit-banged through `$D3E2` with hold times written
+  for a 1.79 MHz 6502. Altirra warns that a 65C816 in fast RAM violates
+  them easily; pad the routine or run that region slow.
+- **Code in fast RAM is immune to ANTIC DMA cycle-stealing**, which is a
+  real win beyond the clock ratio.
+- **Early cards conflict with Ultimate 1MB** when enabling the OS from U1MB
+  flash and then pressing reset; later revisions fix it. Lotharek also
+  recommends replacing motherboard DRAM with an SRAM module for this board
+  combination.
+
+### Do not hardcode the memory map - probe it
+
+Writing each bank's own number and reading them all back sizes real RAM and
+rejects mirrors without knowing anything about the board. It matters here:
+the documented "14.5 MB at `$080000`" misses the low-bank SRAM, which is
+*contiguous* with the SDRAM above it, so the true unbroken run starts far
+lower and reaches bank `$EF`.
+
+### In Altirra
+
+    --adddevice rapidus
+
+A *plain* 65C816 with linear RAM and no accelerator is a different machine
+(the shape of an Antonia) and needs the simulator's own CPU and high-bank
+settings rather than this device.
+
+
+*All facts are self-contained in this file. Reference articles covering Sophia, Sophia II, the Rapidus accelerator, APE-Time RTC, and LDW Super 2000/CA-2001 — content fully embedded in this file.
