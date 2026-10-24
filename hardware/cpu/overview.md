@@ -5,7 +5,7 @@
 This file covers CPU architecture for the Atari 8-bit in four progressive layers:
 1. **Quick-lookup table** — scan or search for the fact you need; jump to the § directly
 2. **Reference tables & register maps** — the dense lookup layer most frequently referenced
-3. **Working code examples** — verified ASM/pattern snippets
+3. **Code patterns** — partial reference snippets; runnable validation is documented in `tooling/validation.md`
 4. **Deep reference notes** — edge cases, caveats, implementation rules
 
 | Out of scope | See instead |

@@ -6,9 +6,8 @@ description: >-
 
 # 08 — CRT Editor & Screen I/O
 
-> earlier coverage on CIO key input, text record editing, character output, string printing, and editor control codes (all summaries in inline reference)> **Scope:** ATASCII screen codes, CIO GET/PUT/PRINT, key scancodes, number-base conversion on screen
-> **Key items:** ATASCII $1B/$9B/$7D/$7E/$7F; CIOV $E456; IOCB $0340; KBCODE; hex_lookup table
-> **Scope:** ATASCII screen codes, CIO GET/PUT/PRINT, key scancodes, number-base conversion on screen
+> **Key items:** ATASCII $1B/$9B/$7D/$7E/$7F; CIOV $E456; IOCB $0340; KBCODE; ATASCII vs screen codes
+> **Scope:** ATASCII screen codes, CIO GET/PUT/PRINT, key scancodes, number formatting
 
 ## Quick-lookup
 
@@ -16,13 +15,16 @@ description: >-
 |---|---|
 | ATASCII screen codes table | §8.1 |
 | IOCB table + CIO GET/PUT/PRINT boilerplate | §8.2 |
-| RAW key scancode read (KBCODE\u2192shifter) | §8.3 |
-| Binary-to-hex digit lookup | §8.4 |
-| 16-bit decimal-to-screen with EOL $9B | §8.4 |
+| Raw KBCODE read and modifier bits | §8.3 |
+| Hexadecimal digit encoding | §8.4 |
+| Decimal buffer sizing and conversion contracts | §8.4 |
 
 ## 8.1 ATASCII Screen Code Table
 
-ATASCII has 128 code points ($00–$7F); character codes map 1:1 with ATASCII in text modes — the byte value is both the ATASCII code and the character-set index.
+ATASCII is the byte-oriented character/control encoding used by OS text I/O.
+ANTIC screen RAM uses a different code order. For example, ATASCII space is
+`$20`, but the corresponding screen code is `$00`. Bit 7 has mode-dependent
+attribute behavior; do not treat all control bytes as printable glyphs.
 
 **ATASCII to Screen Code Mapping:**
 
@@ -47,7 +49,7 @@ ATASCII has 128 code points ($00–$7F); character codes map 1:1 with ATASCII in
 | `$7D` | 125 | CLEAR | Clears screen and homes cursor to top-left. |
 | `$7E` | 126 | BACKSPACE | Deletes char to the left of cursor and moves cursor left. |
 | `$7F` | 127 | TAB | Moves cursor to next tab stop. |
-| `$9B` | 155 | END OF LINE | Moves cursor to start of next line. Cancels auto-repeat on shift keys. |
+| `$9B` | 155 | END OF LINE | Ends the current text record and advances to the next line. |
 | `$9C` | 156 | DELETE LINE | Deletes current logical line. Text below moves up. |
 | `$9D` | 157 | INSERT LINE | Inserts blank line at cursor. Lines below move down. |
 | `$9E` | 158 | CLEAR TAB | Clears tab stop at current cursor position. |
@@ -56,47 +58,32 @@ ATASCII has 128 code points ($00–$7F); character codes map 1:1 with ATASCII in
 | `$FE` | 254 | DELETE CHAR | Deletes char at cursor. Text to the right moves left. |
 | `$FF` | 255 | INSERT CHAR | Inserts space at cursor. Text to the right moves right. |
 
-**ANTIC encoding:** In text modes (Modes 2/3), ANTIC uses the screen byte value as an 8-bit index into the character set. GTIA modes and Graphics 0/8/9/+ are different; See ANTIC display processor.
+**ANTIC encoding:** In modes 2/3, bits 0–6 select one of 128 glyphs; bit 7
+controls the CHACTL-dependent inversion/blanking attribute. Other character
+modes assign the high bits differently; see [character modes](../graphics/character-modes.md).
 
 ---
 
-## 8.2 Keyboard & CRT Editor I/O (CIO)
+## 8.2 Keyboard and Screen I/O through CIO
 
-CIO channels on XL/XE run through IOCB table at `$0340` (IOCB0 starts at `$0340`, offset 16 bytes per channel).
+Use the canonical [IOCB layout and lifecycle](os-vectors-handlers.md#3-cio-and-iocb-lifecycle).
+`CIOV=$E456`; X is the IOCB byte offset (`channel * 16`), not the channel number.
+Channels are opened on device names, not hardwired to K: or S:.
 
-```asm
-; --- CIO GET — read one character (IOCB #1 = keyboard) ---
-        GET    #1
-        ldx    #$01               ; IOCB #1 hardwired to keyboard
-        lda    #$05               ; $05 = CIO GET verb
-        sta    $0340,x            ; CIO command byte
-        jsr    CIOV               ; $E456 (XL/XE)
-        bmi    ?err               ; negative = error
-        lda    $0342,x            ; buffer+2 = character
-        ; A = key in ATASCII ($9B = EOL in token form)
+- OPEN = 3, GET record = 5, GET character(s) = 7, PUT record = 9,
+  PUT character(s) = 11, CLOSE = 12.
+- Set the command at `$0342,x`, buffer address at `$0344/5,x`, and transfer
+  length at `$0348/9,x`. Check returned Y/status, not carry.
+- A normal OS launch already has IOCB0 open on E:. A nonzero channel for K:
+  must be opened first and closed when finished.
+- ATASCII end-of-line is `$9B`, not a CR/LF pair.
 
-; --- CIO PUT — write one character to screen (IOCB #2 = screen) ---
-        lda    #$09               ; CIO PUT verb
-        sta    $0350,x            ; IOCB #2 command
-        jsr    CIOV
+[text-io.asm](../examples/text-io.asm) is a complete program that writes a
+prompt through E:, finds and opens a K: channel, reads one character into a
+buffer, echoes it, and closes the channel. It includes equates and RUNAD.
 
-; --- CIO PRINT — write string + EOL to screen ---
-        ; MADS macro syntax:
-        PRINT  "HELLO WORLD!",$0D0A
-```
-
-**IOCB table (offsets from base `$0340 + N*16`):**
-
-| Offset | Field | Notes |
-|--------|-------|-------|
-| `+0` | Command / status byte | Write verb here before CIOV |
-| `+2` | Buffer address, low byte | Where the character / data is stored |
-| `+3` | Buffer address, high byte | |
-| `+4` | Buffer length | For GET: ignored; for PUT/PRINT: number of bytes |
-| `+5` | Device ID | `$01` = keyboard, `$02` = display, `$03` = printer |
-| `+6` | Status / auxiliary | |
-
-`CIOV` at `$E456` dispatches the verb at `(IOCB+0)`.
+Source: [cc65 Atari definitions](https://github.com/cc65/cc65/blob/8d86ca7e7ed15300cc4bfaba61a40a3d00f3114d/asminc/atari.inc),
+command constants and IOCB fields; Atari XL OS CIO/keyboard handlers.
 
 ---
 
@@ -127,53 +114,15 @@ Reference: [Altirra Hardware Reference Manual](https://www.virtualdub.org/downlo
 
 ---
 
-## 8.4 Number Base On Screen
+## 8.4 Formatting Numbers
 
-### Binary-to-hex digit
+For CIO output, hexadecimal digits are ATASCII `0123456789ABCDEF`. A nibble
+can index that 16-byte table after `AND #$0F`; the caller must supply A and
+accept X/A/flags being clobbered. Direct screen-RAM output needs screen codes
+instead: `$10–$19` for digits, `$21–$26` for A–F in the standard set.
 
-Convert low nibble in A to a single hex ASCII digit, then write it to screen RAM:
-
-```asm
-hex_lookup
-        .byte  "0123456789ABCDEF"
-to_ascii_hex
-        and    #$0F             ; isolate nibble
-        tax
-        lda    hex_lookup,x     ; A = ASCII '0'-'F'
-        rts
-```
-
-### Decimal to screen (16-bit unsigned, right-aligned)
-
-Result written to a 6-byte screen-memory buffer, terminated with EOL ATASCII `$9B`. Exercise the divide-by-10 routine from the math routines section §10; write each digit to screen via CIO PUT:
-
-```asm
-; AX = 16-bit value; buffer points at screen RAM
-dec_to_screen
-        ldx    #5               ; 6 digits, right-aligned
-@next   lda    #$20             ; pre-fill with SPACE
-        sta    buffer,x
-        dex
-        bpl    @next
-        ldx    #0
-@loop   jsr    div_10_16        ; AX = AX / 10; A = remainder
-        ora    #$30             ; convert digit to ATASCII
-        sta    buffer+5,x       ; write right-to-left
-        inx
-        cpx    #6
-        bne    @loop
-        lda    #$9B             ; EOL
-        sta    buffer+6
-        rts
-
-buffer  .byte  5,0              ; e.g. screen row buffer, 6 chars wide
-```
-
-### Routine reference
-
-Dividing a 16-bit value by 10: See math routines §10.2 (16-bit ÷10, 79 or 96 bytes depending on space/speed trade-off).
-
----
-
-*Earlier coverage in this file:*
-*ATASCII table §8.1; CIO GET/PUT/PRINT §8.2; scancodes §8.3; number base conversion §8.4.*
+For decimal output, reserve five digits for an unsigned 16-bit value (0–65535)
+and a separate terminator if the chosen I/O operation needs one. A six-byte
+buffer cannot be declared as two bytes and then indexed through six positions.
+Use a complete conversion routine with explicit quotient/remainder and buffer
+contracts; do not assume an undeclared `div_10_16` helper exists.

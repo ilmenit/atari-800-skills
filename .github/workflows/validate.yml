@@ -1,0 +1,25 @@
+name: Validate examples and references
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build pinned MADS
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fp-compiler
+          git clone https://github.com/tebe6502/Mad-Assembler.git /tmp/mads-source
+          git -C /tmp/mads-source checkout ecc27e941c41d41dedce64de98162101fbef8261
+          cd /tmp/mads-source
+          fpc -Mdelphi -O3 mads.pas
+          echo /tmp/mads-source >> "$GITHUB_PATH"
+      - name: Run assembly and behavioral validation
+        run: |
+          python -m pip install -r tests/requirements.txt
+          python scripts/validate.py

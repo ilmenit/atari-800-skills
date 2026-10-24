@@ -1,74 +1,49 @@
-# Interrupts
+# IRQ, NMI, and BRK
 
-## 1.5  Interrupts — IRQ / NMI / BRK
+## CPU stack contract
 
-### IRQ (maskable)
+On an NMOS 6502 interrupt entry the CPU pushes return PC and P, sets I, and
+fetches the appropriate vector. It does not save A/X/Y. RTI restores P and PC;
+RTS consumes a subroutine return address with a different convention.
 
-- **Level triggered** — IRQ line must remain asserted; the 6502 responds when I-flag is clear.
-- The IRQ must be **cleared at the device** before `CLI`, else IRQ handler re-enters immediately.
-- **Branch delay:** a taken non-page-crossing branch delays IRQ acknowledge by 1 cycle. Cross-page branch = 4 cycles, no extra delay.
-- **Overlapping IRQ + NMI:** IRQ acknowledged at cycle 4–8 can be hijacked by NMI; NMI executes with B flag set on stack if overlapping a BRK.
+- IRQ is level-triggered and maskable with I. Clear the peripheral source before
+  returning with IRQs enabled or it can be serviced again immediately.
+- NMI is edge-triggered and is not masked by SEI. A later edge can nest an NMI
+  even while I is set. Stack depth depends on the actual interrupted code,
+  handler saves, and subroutine calls; there is no fixed safe DLI nesting count.
+- BRK uses the IRQ vector but marks its pushed status with B. The 6502 has no
+  persistent B register bit corresponding to that stack marker. NMI/BRK/IRQ
+  overlap has additional CPU-specific behavior; consult the hardware reference
+  for cycle-level handling rather than guessing from NMIST.
+- NMOS 6502 does not clear decimal mode on interrupt entry. A handler that uses
+  binary ADC/SBC must establish D=0; RTI restores the interrupted status.
 
-### NMI (edge‑triggered, non‑maskable)
+## Atari OS dispatch
 
-On the 400/800: `RNMI` asserted only once on leading edge of VBLANK → OS warm-start handler (`$FED6`). On XL/XE: RESET button asserts `RESET` line directly (not RNMI); NMIST bit 5 stays latched until NMIRES write.
+The OS NMI dispatcher tests NMIST and jumps through VDSLST for DLI. That path
+does not save A/X/Y; a DLI preserves the registers it changes and ends in RTI.
+The VBI path saves A/X/Y before entering the OS VBI chain. A deferred VBI exits
+through XITVBV, which restores those saves and executes RTI. See the
+[OS vector contracts](../../system/os-vectors-handlers.md).
 
-**NMIST (`$D40F`) bit layout**:  
-- bit 7 = DLI occurred  
-- bit 6 = VBI occurred  
-- bit 5 = RNMI / SYSTEM RESET (400/800 only)  
-- bit 4–0 = unused / reserved
+Install vectors before enabling their source. If an existing DLI is enabled,
+disable it while updating the two-byte VDSLST pointer; SEI is insufficient.
+Keep a write-only NMIEN shadow when the previous mask must be restored.
 
-DLI and VBI bits are mutually exclusive; DLI bit is cleared at scan line 248; VBI bit cleared whenever a DLI fires. NMIRES write does NOT suppress the pending interrupt — it only resets the status bit.
+## ANTIC status
 
-**Critical: never set NMIEN bit 7 before `VDSLST` is valid:**
+| NMIST bit | Source |
+|---|---|
+| 7 | Display-list interrupt |
+| 6 | Vertical-blank interrupt |
+| 5 | System Reset / RNMI on 400/800 |
 
-```asm
-        lda #<my_dli        ; set vector FIRST
-        sta VDSLST
-        lda #>my_dli
-        sta VDSLST+1
-        lda #$C0            ; NMIEN: $40=VBI, $80=DLI
-        sta NMIEN           ; NOW enable
-```
+Reading NMIST does not clear it. Writing NMIRES (`$D40F`) resets status bits.
+The DLI bit clears when VBI status is set at scanline 248; ANTIC updates status
+as new events occur. A status clear is not the same operation as clearing a
+level-triggered IRQ line. On 400/800, System Reset RNMI is synchronized to
+vertical blank and the OS gives it priority. XL/XE System Reset uses hardware
+RESET instead, and its unused RNMI status can be stale after power-on.
 
-### BRK edge case
-
-BRK = 7-cycle interrupt sequence, B-flag set on stack. If an NMI fires during cycles 4–8 of the BRK sequence, the NMI vector executes **with B-flag set**. Therefore a robust NMI/IRQ handler must check BRK first, then fall through to VBI in both:
-
-```asm
-dli_handler
-        pha                  ; save A
-        txa
-        pha
-        tya
-        pha
-        lda NMIST
-        bpl ?vbi             ; B clear → IRQ/BRK
-        ; BRK path: check RTI return
-        bne ?dli             ; don't care about BRK here, VBI applies or DLI
-?dli    lda NMIST
-        and #$80
-        beq ?end             ; no DLI
-        ; ... DLI handler body ...
-?end    pla
-        tay
-        pla
-        tax
-        pla
-        rti
-```
-
----
-
-## 1.6  DLI Interrupt Hierarchy (Summary)
-
-| Event | Effect on In-Progress DLI | Notes |
-|---|---|---|
-| **DLI while another DLI running** | First DLI saved; second executes; first resumes several lines later → artifacts if too slow | DLI stack: max 25 DLI frames before VBI |
-| **WSYNC + interrupt gotcha** | Interrupt processing + ANTIC font cycles consume the first WSYNC → extra scan line of old color | Don't put WSYNC at top of DLI if already behind |
-| **VBI while DLI running** | DLI resumes on first scan line of the *next frame* after VBI completes | VBI is highest priority |
-| **DLI while VBI running** | VBI resumes; DLI fires on scan line 24 of *following* frame | Delayed delivery |
-| **JVB `$C1` + DLI** | DLI on *every* scan line 224–248; up to 24 DLIs stack; unwind after VBI | DLI must be extremely short (~12-20 cycles) |
-
----
+Sources: [Altirra Hardware Reference Manual, 2026-01-02](https://www.virtualdub.org/downloads/Altirra%20Hardware%20Reference%20Manual.pdf),
+§§3.4 and 4.8; [Atari XL OS Rev.2 NMI/DVNM](https://github.com/ilmenit/A800-OS-XL-Rev2).

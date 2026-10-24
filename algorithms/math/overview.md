@@ -1,27 +1,18 @@
-# Overview
+# Math Reference Map
 
-## Quick-lookup
+Choose the narrowest topic. Runnable/include-only status and validation are
+stated per routine; the presence of an assembly block alone is not verification.
 
-| Need | See § |
+| Need | Reference |
 |---|---|
-| Multiply by 3 / 10 / 96 | §10.1 |
-| 8×8→16 via 512-byte LUT (Keldon) | §10.1 |
-| Smallest 8×8 multiply (16 bytes) | §10.1 |
-| Fast 8×8 multiply (~45 cycles avg, 1580 bytes) | §10.1 |
-| 16×16→32 shift-add loop | §10.1 |
-| 65816 HW multiply $4202/$4203 | §10.1 |
-| Divide by 2–32 (8–21B each) | §10.2 |
-| 16-bit / 10 (79B verifiable) | §10.2 |
-| Modulo 255 (5B constant-time) | §10.3 |
-| Range-clamp [LO..HI] | §10.3 |
-| Two's-complement negation (16-bit) | §10.3 |
-| BIT-trick for carry arithmetic | §10.3 |
-| QS multiply (quarter-square) | §10.5 |
-| Sine/cosine lookup tables | §10.6 |
-| Logarithmic atan2 (no division) | §10.9 |
-| Distance via squared-table + sqrt | §10.10 |
-| 8×8 square-table multiply (fmulu) | §10.11 |
-| Fast table-driven sqrt | §10.12 |
-| Quadratic splines for paths/curves | §10.13 |
-
----
+| Tested 16-bit constant multiplies, 8x8 and 16x16 multiplication | [multiplication.md](multiplication.md) |
+| Tested quarter-square multiply and 9-bit sum indexing | [quarter-square.md](quarter-square.md) |
+| Division patterns | [division.md](division.md) |
+| Modulo, range, and negation | [range-modulo-negation.md](range-modulo-negation.md) |
+| 65816 widths and flag behavior | [65816-math.md](65816-math.md) |
+| Trigonometric tables | [trig-tables.md](trig-tables.md) |
+| Square-root / logarithm patterns | [sqrt-log.md](sqrt-log.md) |
+| OS floating point | [floating-point.md](floating-point.md) |
+| Logarithmic atan2 | [atan2-log.md](atan2-log.md) |
+| Squared-distance / sqrt patterns | [sqrt-distance.md](sqrt-distance.md) |
+| Spline paths | [splines.md](splines.md) |

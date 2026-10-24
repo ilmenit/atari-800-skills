@@ -202,97 +202,14 @@ Treat `.obx`, `.lst`, and `.lab` beside source files as verification artifacts: 
 
 ---
 
-## 14.5 Demo Skeleton Template
+## 14.5 Runnable Starter Programs
 
-```asm
-; Demo skeleton: init -> deferred VBI + DLI -> main loop
-; Target machine type: Atari XL/XE, MADS assembler
-
-        .org   $2000            ; standard XEX load address
-
-; ============================================================
-; INIT
-; ============================================================
-init
-        sei                    ; mask IRQs during init
-        lda    #$00
-        sta    NMIEN            ; disable DLI/VBI during setup
-
-        ; set up display list
-        lda    #<display_list
-        sta    SDLSTL            ; OS shadow: $0230
-        lda    #>display_list
-        sta    SDLSTL+1
-
-        ; set up deferred VBI through the OS
-        ldy    #<my_vbi
-        ldx    #>my_vbi
-        lda    #$07              ; deferred VBI slot
-        jsr    SETVBV
-
-        ; set up DLI vector. VDSLST is DLI-only, not VBI.
-        lda    #<my_dli
-        sta    VDSLST
-        lda    #>my_dli
-        sta    VDSLST+1
-
-        ; enable VBI + DLI
-        lda    #$C0             ; $40=VBI, $80=DLI
-        sta    NMIEN
-
-        ; Zero page init
-        ldx    #$00
-@zloop  lda    #$00
-        sta    zpage,x
-        inx
-        bne    @zloop
-
-        cli                    ; re-enable IRQs
-        ; fall through to main loop
-
-; ============================================================
-; MAIN LOOP
-; ============================================================
-main_loop
-        ; per-frame work here (input -> update -> render -> VBI swap)
-        jmp    main_loop
-
-; ============================================================
-; VBI
-; ============================================================
-my_vbi
-        ; per-frame deferred work:
-        ;   - update scroll accumulators
-        ;   - swap display-list pointers
-        ;   - clear VSCROL/HSCROL shadow state
-        jmp    XITVBV            ; correct deferred VBI exit path
-
-; ============================================================
-; DLI
-; ============================================================
-my_dli
-        pha
-        txa
-        pha
-        tya
-        pha
-        sta    WSYNC             ; align visible register writes
-        ; write hardware color/GTIA/ANTIC registers here, not shadows
-        pla
-        tay
-        pla
-        tax
-        pla
-        rti
-
-; ============================================================
-; Data
-; ============================================================
-display_list
-        .byte  $70,$70,$70       ; 3 blank lines (top border)
-        .byte  $4C               ; JVB -> loop
-        .word  display_list
-```
+Use the maintained sources listed in [workflow.md](workflow.md#starter-programs).
+[bitmap-dli-vbi.asm](../examples/bitmap-dli-vbi.asm) replaces the former partial
+demo skeleton: it includes equates, actual bitmap memory, valid LMS/JVB bytes,
+RUNAD, balanced interrupt handlers, and cleanup. Its display list is checked
+by the validation script. Other catalog entries in this chapter describe
+external examples; they are not bundled runnable sources.
 
 ---
 

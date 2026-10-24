@@ -54,13 +54,7 @@ init_deferred_vbi
         rts
 
 my_vbi
-        pha
-        txa
-        pha
-        tya
-        pha
-
-        ; frame work here
+        ; frame work here; OS NMI entry already saved A/X/Y
 
         jmp   XITVBV          ; not RTI
 ```
@@ -71,17 +65,18 @@ Use immediate VBI only for short hardware-critical work. Put ordinary frame upda
 
 | Entry | Address | Use |
 |---|---|---|
-| `CIOV` | `$E456`/`$E457` family in OS docs | CIO command dispatch through IOCB |
-| `SIOV` | `$E459` family | Serial I/O call using DCB |
-| `SETVBV` | `$E45C` family | Install VBI vector |
-| `SYSVBV` | `$E45F` family | OS immediate VBI processing |
-| `XITVBV` | `$E462` family | Exit OS VBI path |
+| `CIOV` | `$E456` | CIO command dispatch through IOCB |
+| `SIOV` | `$E459` | Serial I/O call using DCB |
+| `SETVBV` | `$E45C` | Install VBI vector |
+| `SYSVBV` | `$E45F` | OS immediate VBI processing |
+| `XITVBV` | `$E462` | Exit OS VBI path |
 | `DOSVEC` | `$000A/$000B` | DOS entry vector |
 | `DOSINI` | `$000C/$000D` | DOS initialization vector |
 | `RUNAD` | `$02E0/$02E1` | Binary load run address |
 | `INITAD` | `$02E2/$02E3` | Binary load init address |
 
-Use symbolic labels from the assembler include file when available; OS listings and assemblers sometimes document entry labels at the vector byte before the callable `JMP` target.
+These addresses point to callable three-byte JMP vectors. `$E457` is an operand
+byte of the CIOV vector, not an alternative entry. Use symbolic equates.
 
 ## 3. CIO and IOCB Lifecycle
 
@@ -91,10 +86,12 @@ Typical fields:
 
 | Offset | Meaning |
 |---|---|
-| `+0` | command/status byte |
-| `+1` | device handler index / unit |
-| `+2/+3` | buffer address |
-| `+4/+5` | put/get routine or length depending on command context |
+| `+0` | ICHID: handler index (`$FF` = closed/free) |
+| `+1` | ICDNO: device unit |
+| `+2` | ICCOM: command |
+| `+3` | ICSTA: returned status |
+| `+4/+5` | ICBAL/ICBAH: buffer address |
+| `+6/+7` | ICPTL/ICPTH: handler PUT-byte address minus one |
 | `+8/+9` | buffer length |
 | `+10/+11` | auxiliary parameters |
 
@@ -103,7 +100,7 @@ Lifecycle:
 1. Find a free IOCB (`+0 == $FF` is commonly used as free marker).
 2. Write command, device name buffer, length, and AUX fields.
 3. Call `CIOV` with X set to IOCB offset.
-4. Check carry/status after return.
+4. Check Y (`BMI` immediately after the call detects a negative error status); carry is not the CIO success contract.
 5. Close the channel when finished.
 
 Common devices: `E:` screen editor, `S:` screen, `K:` keyboard, `D:` disk, `C:` cassette, `P:` printer, `R:` serial.
@@ -144,3 +141,8 @@ Agent guidance:
 - Do not call OS ROM routines while OS ROM is banked out; use a trampoline that restores PORTB first.
 - Preserve registers according to the vector path: DLI handlers save what they use; OS VBI path has its own restore expectations.
 - Separate shadow registers from hardware registers. VBI may update shadows; DLI must write hardware registers for immediate raster effects.
+
+Sources: [Atari XL OS Rev.2 source](https://github.com/ilmenit/A800-OS-XL-Rev2),
+`NMI`, `DVNM`, and the OS vector table; [cc65 Atari equates](https://github.com/cc65/cc65/blob/8d86ca7e7ed15300cc4bfaba61a40a3d00f3114d/asminc/atari.inc).
+The OS `NMI` saves A/X/Y for the VBI path; `DVNM` (via `XITVBV`)
+pops Y/X/A and executes RTI. Extra pushes must be balanced before that jump.

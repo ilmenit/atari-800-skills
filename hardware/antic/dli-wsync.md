@@ -4,14 +4,15 @@
 
 ### Pre-Topic DLI Crash-Course (from playermissile.com)
 
-The NMI path: `$FFFA → OS NMI dispatcher → VDSLST user vector ($200/$201)`. OS NMI handler saves PSR (but not A/X/Y — user handler must save them).
+The NMI path: `$FFFA → OS NMI dispatcher → VDSLST user vector ($200/$201)`. The CPU pushes PC and P on NMI entry. The OS DLI dispatch path does not save
+A/X/Y; a user DLI must preserve the registers it changes.
 
 ```
 NMIEN ($D40E)   : $40 = VBI enable, $80 = DLI enable
 NMIEN must be written by cycle 7 to ENABLE, cycle 8 to DISABLE.
 
 VDSLST          : set this BEFORE writing NMIEN bit 7 ($80)
-VDSLST+2 (=NMIRES): write $FF to clear DLI NMI flag (optional; not needed after boot)
+NMIRES ($D40F)  : write to reset NMI status; VDSLST+2 is $0202 (VPRCED)
 
 RTCLOK+2 ($14)   : increments once per VBI — use to gate VBI-rate work
 WSYNC ($D40A)   : write any value; CPU waits ≈cycle 105/114

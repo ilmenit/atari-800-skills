@@ -1,8 +1,9 @@
 ---
 name: atari8bit
 description: >-
-  Root router for Atari 8-bit XL/XE AI-agent skills. Load this file first,
-  then choose the smallest matching topic file from this skill directory.
+  Develop, debug, optimize, and reverse-engineer Atari 8-bit 6502 programs:
+  hardware, OS services, graphics, audio, MADS assembly, and peripherals.
+  Includes model-specific guidance for 400/800, XL/XE, and 5200.
 ---
 
 # Atari 8-bit Agentic Programming Skills
@@ -13,7 +14,7 @@ description: >-
 Use progressive disclosure:
 
 1. Read this router.
-2. Open exactly one or two topic files that match the task.
+2. Open the smallest set of topic files that matches the task.
 3. Use additional topic files only when the task crosses domains.
 
 This skill is self-contained. The topic files below are the available reference material in this repository.
@@ -32,7 +33,8 @@ This skill is self-contained. The topic files below are the available reference 
 - **`system/os-hardening.md`** — OS ROM disable, trampoline handlers, RESET survival, VCOUNT/VBLANK bare-metal sync.
 - **`system/storage.md`** — SIO protocol, disk commands, XEX/ATR formats, CIO file access, SpartaDOS X, loader/depacker reversing.
 - **`system/screen.md`** — ATASCII, screen codes, CIO GET/PUT/PRINT, keyboard codes, number display.
-- **`system/input.md`** — Joysticks, paddles, mouse, light pen, console keys, trigger registers.
+- **`system/input.md`** — Keyboard scan codes and polling, joysticks, paddles, mouse, light pen, console keys, trigger registers.
+- **`system/5200.md`** — 5200 memory map, analog controllers, keypad scanning, and computer-to-console porting differences.
 - **`system/compatibility.md`** — 400/800 vs XL/XE, PAL/NTSC, RAM expansions, CPU/chip/upgrades detection matrix.
 - **`system/cartridges-pbi.md`** — Cartridge windows, banking, PBI devices, internal devices, reverse-engineering notes.
 
@@ -64,6 +66,8 @@ This skill is self-contained. The topic files below are the available reference 
 
 ## 6. `tooling/` — Build, Examples, Reversing
 
+- **`tooling/workflow.md`** — Build/run/debug commands, complete starter programs, memory ownership, frame scheduling, and PAL/NTSC validation.
+- **`tooling/validation.md`** — Repeatable assembly/emulation checks, source provenance, and the limits of validation.
 - **`tooling/mads-assembler.md`** — Compact MADS syntax, directives, macros, procedures, banks, relocatables, 65816 addenda. For full MADS assembler documentation, use the standalone `mads/` skill.
 - **`tooling/code.md`** — Ready-to-read examples: sieve, Tetris, RLE, GTIA 9++, 40x40, demoscene catalog.
 - **`tooling/reversing.md`** — XEX/ATR/source/listing triage, segment maps, depackers, Altirra tracing, hardware breakpoints.
@@ -81,3 +85,5 @@ This skill is self-contained. The topic files below are the available reference 
 - Prefer the narrowest topic file that directly matches the request.
 - If a task needs both hardware facts and implementation guidance, load the hardware topic first, then the graphics, audio, system, or tooling topic that covers the code path.
 - When copying assembly snippets, copy the whole contract: routine, declared input/output registers or memory, scratch bytes, required lookup tables, and any init routine. If a topic provides generated tables, prefer those over incomplete symbolic table names.
+- Establish the target machine, RAM, video timing, assembler, OS/DOS ownership, and required upgrades from the task or project. State consequential assumptions when those are unspecified.
+- A reference snippet is partial unless it explicitly identifies a runnable source and its validation. Prefer the assembled examples linked from `tooling/workflow.md` when starting a program.

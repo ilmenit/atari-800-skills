@@ -1,31 +1,30 @@
-# Rmw Inc Dec
+# Read-Modify-Write and Hardware Registers
 
-## 11.1 INC / DEC and Zero-Page Read-Modify-Write
+NMOS 6502 INC/DEC/ASL/LSR/ROL/ROR on memory read the old value, write that old
+value back, then write the modified value. Zero-page INC/DEC occupy two bytes
+and take five CPU cycles; absolute INC/DEC occupy three bytes and take six,
+before DMA stalls. Arithmetic wraps modulo 256 and updates N/Z; INC/DEC leave
+carry unchanged.
 
-### RMW on zero page
+Hardware read and write meanings can differ at the same address. For example,
+`$D208` reads ALLPOT but writes AUDCTL. `INC $D208` therefore does not safely
+increment a stored AUDCTL configuration. NMIEN is write-only, so reading it as
+part of INC/DEC does not recover the previous enable mask. A write to NMIRES
+clears NMI status; it does not generate a new NMI.
 
-`INC <addr>` and `DEC <addr>` are single-byte instructions on zero page that perform a read-modify-write cycle inside the chip. They honour the bit-7 wrap for `INC` and underflow for `DEC`:
+Use a software shadow or a known configuration and an explicit store:
 
 ```asm
-zp_inc  equ $80
-zp_dec  equ $81
-
-        inc   zp_inc          ; NZ flags set from result
-        dec   zp_dec          ; NZ flags set from result
+; Partial snippet: caller owns NMI configuration and initialized VDSLST.
+        lda nmi_mask
+        ora #$80
+        sta nmi_mask
+        sta NMIEN
 ```
 
-### INC / DEC on hardware registers — AUDCTL and NMIEN
+Account for both writes before deliberately using an RMW instruction on I/O.
+CMOS CPU variants have different bus-cycle details; do not infer portable
+hardware side effects from the NMOS sequence.
 
-Writing to `AUDCTL ($D208)` with `INC` or `DEC` increments/decrements the high-frequency timer divisor. On `NMIEN ($D40E)`, `INC` pulls NMI masking bits into the DLI enable (DLI active high), and `DEC` turns them back off.
-
-**INC NMIRES trick (quick-enable NMI):**
-
-Writing any value to `NMIRES ($D40F)` immediately cause NMI to fire if it is not currently masked. Pairing `INC NMIRES` with the NMI/IRQ flip can save one cycle in the ISR for 400/800 event loop needs.
-
-**Practical INC/DEC patterns:**
-```asm
-        inc   $d40e            ; unblock NMI/DLI
-        dec   $d40e            ; block NMI/DLI
-```
-
----
+Source: [Altirra Hardware Reference Manual](https://www.virtualdub.org/downloads/Altirra%20Hardware%20Reference%20Manual.pdf),
+CPU bus cycles and AUDCTL/ALLPOT/NMIEN/NMIRES register descriptions.

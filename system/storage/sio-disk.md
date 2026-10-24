@@ -1,39 +1,59 @@
-# Sio Disk
+# SIO and Disk Access
 
-## §7.1  SIO Serial I/O
+## OS call versus wire protocol
 
-> ⚠ **SIO timeout:** The POKEY SIO serial port times out after roughly 540 ms of no activity (128-bit clock at 19200 baud ≈ 6.692 ms per byte × 80 bytes ≈ 535 ms). If the drive doesn't ACK the device ID within this window, the calling routine must handle the timeout explicitly rather than retry-loops on a dead channel. Always check the STATUS byte after every SIO transmission before reusing the DCB.
+SIOV (`$E459`) consumes the 12-byte DCB at `$0300–$030B`. DSKINV (`$E453`)
+is the OS disk-driver wrapper that supplies standard disk fields before calling
+SIO. [disk-read.asm](../../examples/disk-read.asm) initializes the complete DCB
+and performs a read-only SIO call; [OS services](os-disk-services.md) describe DSKINV.
 
-> ⚠ **IOCB status discipline:** After CIO calls, always check the returned status before consuming data or reusing the IOCB. Poll loops that treat any nonzero status as success can race device-handler transitions and lose data.
+| DCB field | Address | Meaning for a sector read |
+|---|---|---|
+| DDEVIC | `$0300` | Disk class `$31` |
+| DUNIT | `$0301` | Drive unit, e.g. 1 |
+| DCOMND | `$0302` | `$52` ('R') |
+| DSTATS | `$0303` | `$40` (peripheral-to-computer); overwritten with result |
+| DBUFLO/HI | `$0304/5` | Destination buffer |
+| DTIMLO | `$0306` | Command timeout; initialize for each operation |
+| DUNUSE | `$0307` | Unused, initialize to zero |
+| DBYTLO/HI | `$0308/9` | Transfer byte count |
+| DAUX1/2 | `$030A/B` | Little-endian sector number |
 
-### Frame format
+Check returned Y (negative = error) and DSTATS before consuming a buffer.
+Timeout behavior is controlled by OS routines, command fields, and device
+response timing; POKEY has no universal 540 ms inactivity timeout.
 
-```
-[LEADER] [DEVICE_ID (1)] [COMMAND_FRAME] [ACK/NACK] [DATA_FRAME(s)] [STATUS_FRAME]
-```
+## Command and data frames
 
-| Field | Value |
+The computer asserts COMMAND and sends device ID, command, AUX1, AUX2, and an
+end-around-carry checksum. There is no cassette-style 128-byte sync leader.
+The device then responds with ASCII protocol bytes:
+
+| Byte | Meaning |
 |---|---|
-| Device ID | $40–$4F (serial address) |
-| Leader byte | $55 AA55 AA55 … (128 bytes of sync) |
-| COMMAND frame | 4 bytes: Device-ID + Cmd byte + AUX1 + AUX2 |
-| ACK/NACK | 1 byte: device acknowledges or NACK |
-| DATA frame | Data bytes + CRC |
-| STATUS | Status byte + COMPLETE ($FF) or ERROR ($XX) |
+| `$41` ('A') | ACK |
+| `$4E` ('N') | NAK |
+| `$43` ('C') | COMPLETE |
+| `$45` ('E') | ERROR |
 
-SIO acknowledge byte = device acknowledges ID, then NACK ($00) = fault; COMPLETE (done = $FF). After data transmission: device asserts DONE in status to confirm completion.
+The data direction determines the order of data transfer and acknowledgements.
+Data frames carry an end-around-carry checksum, not a CRC. Device IDs depend
+on peripheral type (disk drives commonly `$31–$38`), not a universal `$40–$4F` range.
 
----
+## Stock drive geometry
 
-## §7.2  Disk Drives (810 / 1050 / XF551 / Indus GT)
+| Drive / format | Typical logical sectors | Bytes per sector | Data capacity |
+|---|---:|---:|---:|
+| 810 single density | 720 | 128 | 90 KiB |
+| 1050 single density | 720 | 128 | 90 KiB |
+| 1050 enhanced density | 1040 | 128 | 130 KiB |
+| XF551 double-sided double density | 1440 | 256 | 360 KiB nominal |
 
-| Drive | Key features |
-|---|---|
-| 810 | 1771 FDC; density 128/256; write-protect pin |
-| 1050 | Enhanced: 256-byte sector interleave; double-sided |
-| XF551 | 512-byte sectors by default; 4 density profiles (180K/360K DS); fast copy-protect |
-| Indus GT | Command-based SIO with interrupt; double-sided 192/360 KB; bootable from P3 |
+The stock 1050 is single-sided; enhanced density does not mean 256-byte
+sectors. Modified drives can expose other formats. The first three boot-sector
+transfers and the ATR storage layout require special handling; see
+[XEX/ATR formats](xex-atr-formats.md). Do not infer filesystem capacity from
+physical geometry alone.
 
-Drive SIO address `$31` unit 1; device type byte `$01` (disk).
-
----
+Sources: [Altirra Hardware Reference Manual, 2026-01-02](https://www.virtualdub.org/downloads/Altirra%20Hardware%20Reference%20Manual.pdf),
+chapters 9–10; [cc65 Atari equates](https://github.com/cc65/cc65/blob/8d86ca7e7ed15300cc4bfaba61a40a3d00f3114d/asminc/atari.inc), DCB and SIO status.

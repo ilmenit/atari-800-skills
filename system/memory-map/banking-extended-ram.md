@@ -1,8 +1,7 @@
-# Banking Extended Ram
-
 ## 2.3  BANK Switching & Extended Memory (XL/XE $4000–$7FFF)
 
-All banking is driven by PORTB (`$D301`).
+Stock XL/XE ROM and 130XE extended-RAM banking use PORTB (`$D301`).
+Other expansion families can use their own registers.
 
 ### PORTB bits for ROM / extended RAM window
 
@@ -11,14 +10,16 @@ All banking is driven by PORTB (`$D301`).
 | 0 | OS ROM at `$C000–$CFFF` + `$D800–$FFFF` | **enabled** | disabled |
 | 1 | BASIC ROM at `$A000–$BFFF` | disabled | **enabled** (inverted) |
 | 4 | Extended RAM window `$4000–$7FFF` | disabled | **enabled** (inverted) |
-| 6 | XEGS game ROM `$A000–$BFFF` | disabled | **enabled** (inverted) |
+| 5 | 130XE ANTIC extended window `$4000–$7FFF` | disabled (base RAM) | **enabled** |
+| 6 | XEGS game ROM `$A000–$BFFF` (when BASIC is off) | disabled | **enabled** |
+| 7 | Self-test ROM `$5000–$57FF` (when OS ROM is on) | disabled | **enabled** |
 
 ```asm
-        ; Disable all system ROMs — full 62 K RAM
+        ; XL/XE: disable OS/BASIC/self-test; cartridge ROM is independent
         lda PORTB
         and #$FE             ; clear bit 0 (OS ROM off)
         ora #$02             ; set bit 1 = BASIC disabled (inverted)
-        and #$7F             ; clear bit 7 = self-test off
+        ora #$80             ; set bit 7 = self-test disabled
         sta PORTB
 ```
 
@@ -26,10 +27,17 @@ All banking is driven by PORTB (`$D301`).
 
 | PORTB[2:3] | 130XE bank |
 |---|---|
-| `00` / `10` | Bank 0 (`$4000–$7FFF` → RAM) |
-| `01` / `11` | Bank 1 (pseudo-SRAM, visible as `$4000–$7FFF`) |
+| `00` | Extended bank 0 |
+| `01` | Extended bank 1 |
+| `10` | Extended bank 2 |
+| `11` | Extended bank 3 |
 
-Separate ANTIC access (130XE only): bit 5 enables ANTIC's view of extended RAM independently.
+On a stock 130XE, clear bit 4 for CPU extended access and clear bit 5 for
+ANTIC extended access. A set enable bit selects base RAM for that processor.
+Both processors use the same bank selected by bits 2–3; the enable controls
+are independent. The 130XE has four extra 16K banks, not two.
+
+Source: [Altirra Hardware Reference Manual](https://www.virtualdub.org/downloads/Altirra%20Hardware%20Reference%20Manual.pdf), §2.7 and PORTB reference.
 
 | Total Size | Type | Extra Banks | Separate CPU/ANTIC | Bank Bits | Notes |
 |---|---|---|---|---|---|
@@ -48,107 +56,69 @@ Separate ANTIC access (130XE only): bit 5 enables ANTIC's view of extended RAM i
 | 2112k | RAMBO | 128 | NO | 0,1,2,3,5,6,7 | Bit 0 also used (conflicts with OS ROM enable) |
 | 4144k | RAMBO | 256 | NO | 0,1,2,3,4,5,6,7 | All bits used, BASIC/SELF-TEST cannot be enabled |
 
-### Extended RAM Detection Code
+### Extended RAM Detection and Ownership
 
-The following routine detects the size of extended memory non-destructively. It returns the number of extra 16k banks in `Y` (0 if base 64K only) and populates the `banks` array with valid `PORTB` values.
+A bank probe writes RAM, even when it intends to restore it. Do not run one
+after DOS, a RAM disk, or an expansion manager has allocated those banks.
+Use the documented DOS/expansion allocation API when sharing memory.
 
-```asm
-ext_b  = $4000
-portb  = $d301
+For a stock-130XE-only probe, keep the routine, stack, save table, and active
+display outside the CPU window. Keep ANTIC on base RAM while probing CPU banks.
+Save original PORTB and all bytes that will be touched, including base RAM;
+mark candidate banks, identify aliases, restore every touched byte, then restore
+PORTB. Do not borrow `$00` or another OS byte as an unrecorded marker.
 
-detect_ext
-       lda portb
-       pha
-       lda #$ff
-       sta portb
-       lda ext_b
-       pha
+A generic expansion probe must additionally account for board-specific bank
+encodings and ROM/self-test control bits. A routine for one wiring scheme does
+not establish that all rows of the expansion table have been detected correctly.
+No raw destructive probe is provided as a validated routine here.
 
-       ldx #$0f       ; Save bytes from 16 possible 64k blocks
-_p0    jsr setpb
-       lda ext_b
-       sta bsav,x
-       dex
-       bpl _p0
+### Axlon-Style Extended RAM
 
-       ldx #$0f       ; Zero them out
-_p1    jsr setpb
-       lda #$00
-       sta ext_b
-       dex
-       bpl _p1
+Axlon-style RAM was designed mainly for Atari 400/800 machines. Like 130XE
+memory, it exposes 16K banks at `$4000-$7FFF`, but it does not provide
+separate CPU and ANTIC banking. The bank-control register is write-only at
+`$CFFF`.
 
-       stx portb      ; Eliminate base memory (X=$FF)
-       stx ext_b
-       stx $00
+Important decode caveat: original-style Axlon hardware incompletely decodes
+the register. It can respond across `$CFC0-$CFFF` and, more dangerously,
+`$0FC0-$0FFF`. Avoid placing code, stack-sensitive data, or unrelated I/O
+there when probing Axlon hardware.
 
-       ldy #$00       ; Loop counting 64k blocks
-       ldx #$0f
-_p2    jsr setpb
-       lda ext_b      ; If ext_b != 0, block already counted
-       bne _n2
-       dec ext_b      ; Mark as counted
-       lda ext_b
-       bpl _n2        ; Hardware check
-       lda portb      ; Write PORTB value to array for bank 0
-       sta banks,y
-       eor #%00000100 ; Banks 1, 2, 3
-       sta banks+1,y
-       eor #%00001100
-       sta banks+2,y
-       eor #%00000100
-       sta banks+3,y
-       iny:iny:iny:iny
-_n2    dex
-       bpl _p2
+| Write to `$CFFF` | Visible bank |
+|---|---|
+| `$00` | base/home bank |
+| nonzero | one extended 16K bank |
 
-       ldx #$0f       ; Restore memory
-_p3    jsr setpb
-       lda bsav,x
-       sta ext_b
-       dex
-       bpl _p3
+This allows up to 255 extra 16K banks, about 4080K extra RAM. Some XL/XE
+expansions emulate Axlon-style banking with `$CFFF` decoded only in ROM space
+when the OS ROM control bit leaves that address visible.
 
-       stx portb      ; X=$FF
-       pla
-       sta ext_b
-       pla
-       sta portb
-       rts
+Axlon detection rules:
 
-setpb  txa            ; Map X index to PORTB bits
-       lsr:ror:ror:ror
-       adc #$01       
-       ora #$01       ; OS ROM enabled
-       sta portb
-       rts
+- Detection code must run entirely outside `$4000-$7FFF`.
+- Save one byte from each candidate bank, mark banks, count consecutive banks
+  that preserve the marker, then restore all saved bytes.
+- Return `$00` to `$CFFF` before leaving so the base bank is visible again.
+- Under SpartaDOS X, avoid raw probing after DOS has allocated extended RAM;
+  use DOS memory-management calls when coexistence matters.
 
-banks  .ds 64
+### PIA Control-Line IRQ Transition
 
+After CB2 has switched from low output to high output (PBCTL bits 5–3:
+`110` → `111`), changing it to an input mode (`0xx`) can set interrupt status
+bit 6. An IRQ follows if that input interrupt is enabled. `$08` selects an
+interrupt-enabled input mode; it is not an output-low command.
 
-> **SpartaDOS X compatibility:** The `detect_ext` routine banks in descending PORTB order,
-stepping X from `$0F` to `$00` via `setpb`. This ordering is the opposite of SpartaDOS X's
-bank allocation, which hands out extended RAM starting from the highest bank. Running
-`detect_ext` inside an SDX session without accounting for SDX's reservation layout can corrupt
-an active RAM disk. For SDX-aware software: use the SDX memory-management API
-(`MXRAM`, `PFCOM`) instead of raw PORTB probing, or call `detect_ext` only before SDX
-has loaded.
+Keep unused PIA interrupts disabled. If a handler deliberately changes modes,
+clear pending status by reading the port's data/input register with control
+bit 2 set; reading the DDR does not clear it. See the Altirra manual §2.5.
 
-bsav   .ds 16
-```
+### Writes to ROM
 
-### PIA port B — spurious IRQ hazard (PBCTL CB2)
+Writes to enabled OS/BASIC/cartridge/self-test ROM do not write through to
+underlying RAM on the stock machines. Change the appropriate mapping before
+accessing that RAM. The current CPU mapping and ANTIC mapping can differ on a
+130XE; establish both when transferring display data.
 
-> ⚠ **PBCTL-CB2 spurious IRQ:** Writing `$08` (CB2 low output) into `PBCTL ($D303)` then switching CB2 back to input mode (any `0xx` setting) causes bit 6 to be set and an IRQ is requested if the PIA interrupt is enabled (`PBCTL[3]=1`). This firing corresponds to the normal SIO command byte reception transition — every SIO packet on the POKEY serial port carries this same mode-change pattern. Safety rule: disable PIA IRQ before switching PBCTL direction and clear the IRQ flag manually before re-enabling.
-
-Writing `$08` (CB2 low output) into `PBCTL ($D303)` then switching CB2 to input mode (any `0xx` setting) causes bit 6 to be set and an IRQ is requested if PIA interrupt is enabled (`PBCTL[3]=1`).
-This corresponds to the normal SIO protocol command byte reception — the transition is part of every SIO packet on the POKEY serial port.
-**Safety rule**: disable PIA IRQ before switching PBCTL direction; clear the IRQ flag manually before re-enabling.
-
-### Writes to ROM are silently discarded
-
-> ⚠ **ROM-write trap:** Writes to any address currently mapped to ROM (OS/BASIC/cartridge/self-test) are silently ignored. The underlying RAM is not accessible at the same address (no write-through as on some other platforms). On the 400/800, only PIA reset-on-power-on clears PIA registers — the RESET key bypasses the PIA, so PBCTL/PACTL must be explicitly reinitialized after warm-boot.
-
-Writes to any address that is currently mapped to ROM (OS / BASIC / cartridge / self-test) are **ignored** — the underlying RAM is not accessible via the same address. It is not possible to write-through ROM as on some other platforms. On the 400/800, only PIA reset on power-on clears PIA registers; the RESET key does not.
-
----
+Source: [Altirra Hardware Reference Manual](https://www.virtualdub.org/downloads/Altirra%20Hardware%20Reference%20Manual.pdf), §§2.5–2.7.

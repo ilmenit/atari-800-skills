@@ -1,38 +1,40 @@
-# Zero Page Stack
+# Zero Page and Stack
 
-## 2.4  Zero-Page Idioms
+## Allocation
 
-| Idiom | Example | Notes |
-|---|---|---|
-| Increment/decrement 16-bit (hi carries if lo overflows) | `INC ptr: INC ptr+1: BNE skip` / `DEC ptr+1: BNE skip` | `INC/DEC ZP` takes 5 cycles, RMW side effect |
-| Bit flag set/clear | `ORA #$80` / `AND #~$80` | LSB/OMSB of bit-index using `:ROL`, `:LSR`, 7 or 0 |
-| Negative-index backwards loop | `LDY #-n: … DEY: BPL loop` | Zero-page table walk backwards wrapped at $00FF |
-| Fast ISR scratch save | `STA save_a: STX save_x: STY save_y` | Hardware stack is fastest; ZP shadow nearby |
-| 16-bit load with skip | `LDA #<val: STA ptr: LDA #>val: STA ptr+1` | Separate LDA avoids page-cross on HIGH byte |
+Use the [base-map ownership table](base-map.md#zero-page-zones). OS zero page
+is not a general scratch area while OS services or interrupts are active.
+Declare each routine's scratch bytes and whether they may be shared with an ISR.
 
----
-
-## 2.5  Stack & Subroutine Parameters
-
-6502 stack: 256 bytes at `$0100–$01FF`, `TSX/TXS` to read/write pointer.
-
-**Parameter-inline trick:** A subroutine can read own return-address off the stack to find embedded data tables after the JSR, avoiding zero-page allocation:
+## Multi-byte operations (partial snippets)
 
 ```asm
-        ; Caller:
-        jsr my_routine
-        .byte $01, $02, $03   ; data table after JSR
+; Increment an unsigned little-endian word modulo 65536. Clobbers N/Z.
+        inc ptr
+        bne increment_done
+        inc ptr+1
+increment_done
 
-        ; Callee:
-my_routine
-        pla                  ; pop low byte of return PC
-        sta data_ptr
-        pla                  ; pop high byte
-        sta data_ptr+1
-        ; Now data_ptr → .byte table past JSR
-        rts
+; Decrement a word modulo 65536. Clobbers A/N/Z; leaves C unchanged.
+        lda ptr
+        bne decrement_low
+        dec ptr+1
+decrement_low
+        dec ptr
 ```
 
----
+Do not increment the high byte unconditionally. INC/DEC do not propagate carry.
+A `DEY/BPL` loop only naturally covers counts up to 128; larger byte spans
+need a loop whose termination contract handles the full unsigned range.
 
-*Content fully self-contained. All key facts are present in this file.
+## Inline parameters after JSR
+
+JSR pushes the address of its final operand byte. Adding one locates the first
+inline data byte. If a callee consumes inline parameters, it must also advance
+the saved return address past them and preserve/rebuild the caller's stack.
+Simply pulling both return bytes and executing RTS discards the return address
+and makes RTS consume unrelated stack contents.
+
+Prefer ordinary A/X/Y parameters or an explicitly allocated pointer unless an
+inline convention provides a demonstrated size advantage. Document parameter
+length, pointer scratch, stack effects, and interrupt/reentrancy assumptions.

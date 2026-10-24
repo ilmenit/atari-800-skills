@@ -32,7 +32,7 @@ Assembler/source implications:
 | ATR magic | `$96 $02` (little-endian: `$0296`); Header size = 16 bytes (`0x10`) |
 | Sector size | 128 bytes (SD), 256 bytes (DD), or 512 bytes |
 | Sector count | SD/512B: `(file size − 16) / sector_size`<br>DD Short layout: `(file size − 384 − 16) / 256 + 3`<br>DD Full/Even/Packed: `(file size − 16) / 256` |
-| Double-sided (1050) | 180K → 720 KB (360 Tracks × 16 Sectors × 256 × 2 sides) |
+| Stock drive capacities | 810: 90 KiB; 1050 enhanced: 130 KiB; XF551 DS/DD: 360 KiB nominal |
 
 Boot and loader notes:
 

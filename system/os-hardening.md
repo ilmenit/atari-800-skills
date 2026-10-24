@@ -15,133 +15,101 @@ description: >-
 | Need | See § |
 |---|---|
 | OS-ROM disable / re-enable | §9.1 |
-| Trampoline handler skeleton | §9.1 |
-| VCOUNT vs VBLANK; PAL VBI split | §9.2 |
+| OS NMI bridge and mapping contract | §9.1 |
+| VCOUNT units and frame synchronization | §9.2 |
 | RESET survival 400/800 vs XL/XE | §9.3 |
-| Warm-flag cold-boot detection | §9.3 |
-| SDLSTL re-entry for embedded SDX | §9.3 |
-| SpartaDOS X DOSVEC detection | §9.4 |
-| SDX binary block types ($FFFA/\u2026) | §9.4 |
+| DOS command-table protocol and SDX API boundaries | §9.4 |
+| SDX binary block types | [SpartaDOS X formats](storage/spartadosx.md) |
 
-## 9.1 OS-ROM Disable & Trampoline Handler
+## 9.1 OS ROM Ownership and an NMI Bridge
 
-### Disable OS ROM on XL/XE
+On XL/XE, PORTB bit 0 selects OS ROM: 1 = enabled, 0 = RAM visible.
+Disabling ROM does not stop hardware keyboard scanning, IRQs, or ANTIC NMIs.
+It removes the OS code and exposes RAM interrupt vectors at `$FFFA–$FFFF`.
+Before switching, mask IRQs with SEI, disable ANTIC NMIs, install valid RAM
+vectors and handlers, and keep executing code outside the switched regions.
+SEI alone cannot mask an NMI. Decide who owns IRQ, NMI, and RESET separately.
 
-PORTB at `$D301` bit 0 controls the OS ROM:
-- **Bit 0 = 0** -- OS ROM disabled (software vectors and CIO/VBI/DLI unavailable)
-- **Bit 0 = 1** -- OS ROM enabled (default)
+For a program that needs OS VBI/DLI dispatch while normally keeping ROM off,
+use [os-nmi-bridge.asm](../examples/routines/os-nmi-bridge.asm). This is an
+include-only routine, not a complete machine-takeover program. It saves A/X/Y
+and PORTB on the stack, enables only the OS bit, builds a synthetic RTI frame,
+and copies the original stacked status into that frame before jumping through
+the now-visible OS NMI vector. Preserving its I bit matters: XL OS stage 2 and
+deferred VBI are skipped when the interrupted status has I set. The OS returns to the bridge,
+which restores PORTB, registers, and the original hardware interrupt frame.
 
-```asm
-        lda PORTB
-        and #$FE              ; clear bit 0 -> OS ROM off
-        sta PORTB
+Requirements:
 
-; Re-enable:
-        lda PORTB
-        ora #$01
-        sta PORTB             ; OS ROM back on
-```
+- Install the bridge address in the RAM NMI vector while ROM is off; initialize
+  the other RAM vectors before allowing their interrupts.
+- Keep the bridge, stack, display data, and any called RAM handlers accessible
+  under both mappings. Account for self-test at `$5000–$57FF` when enabling OS.
+- OS-dispatched DLI handlers end in RTI; deferred VBI handlers use XITVBV.
+  Do not call either as an ordinary RTS-returning subroutine.
+- Leave enough stack space for both interrupt frames, the OS register saves,
+  and any nested DLI. The bridge does not provide an IRQ or RESET solution.
 
-With OS ROM off, all software interrupts (keyboard scan, SIO, VBI/DLI dispatch) stop. You must provide your own NMI/IRQ handler trampoline.
+The CPU test uses a bank-switching memory model and an OS-shaped dispatcher
+stub. It verifies preservation, not compatibility with every ROM revision or
+cycle-exact ANTIC timing. [os-off-vbi.asm](../examples/os-off-vbi.asm) is a complete
+short-lived demonstration with hardware IRQ sources disabled. It tests both
+interrupted I states and also runs in the optional
+full-machine smoke suite. Test the complete program on its target ROM/emulator.
 
-### Trampoline handler
+## 9.2 VCOUNT and Frame Synchronization
 
-The trampoline re-enables the OS ROM, enters the correct OS handler path, then restores the OS-off state before returning:
-
-```asm
-os_trampoline_handler
-        pha
-        txa
-        pha
-        tya
-        pha
-        lda PORTB
-        sta trampoline_PORTB_save
-
-        lda #$01
-        sta PORTB             ; force OS ROM on
-
-        lda NMIST              ; $D40F
-        and #$80               ; DLI?
-        beq @chk_vbi
-        jsr os_dli_entry
-        bne @done             ; always branch
-
-@chk_vbi lda NMIST
-        and #$40               ; VBL?
-        beq @done
-        jsr os_vbi_entry
-
-@done   pla
-        tay
-        pla
-        tax
-        pla
-        sta PORTB              ; restore ROM-off state
-        rti
-```
-
-**Key insight:** NMIST bits are sticky -- they accumulate until the register is read and cleared. Always read NMIST to both identify and acknowledge the pending source.
-
----
-
-## 9.2 VBI / VCOUNT Timing with OS-ROM Off
-
-Without the OS running, RTCLOK is unavailable. `VCOUNT` at `$D40B` is the substitute for all frame-sync and vertical-hold logic.
+`VCOUNT ($D40B)` exposes bits 1–8 of ANTIC's vertical position counter. It
+advances every two scanlines, not every scanline. The manual gives ranges
+0–131 (NTSC) and 0–156 (PAL), including terminal readings around frame wrap.
+VBI begins at scanline 248 on both standards; the remaining blank interval
+is longer on PAL. VCOUNT is a beam-position reference, not an OS frame clock.
 
 ```asm
-wait_scanline_80
-        ldx #$50               ; target scan line
-@poll   lda VCOUNT             ; $D40B -- increments every scan line
-        cpx VCOUNT
-        bne @poll              ; loop until VCOUNT == X
+; Partial routine: wait for entry to the bottom-of-frame interval on XL/XE.
+; In: none. Out: A >=124. Clobbers A/N/Z/C; OS not required.
+; Return once per observed frame transition, not repeatedly within the interval.
+wait_frame
+@leave  lda VCOUNT
+        cmp #124               ; scanline 248 / 2
+        bcs @leave
+@enter  lda VCOUNT
+        cmp #124
+        bcc @enter
         rts
 ```
 
-| Counter | NTSC range | PAL range | Reset |
-|---------|-----------|-----------|-------|
-| `VCOUNT` | 0--227 | 0--311 | wraps at VBLANK start |
-| VBI split point | line 228 | line 250 | -- |
-| Horizontal sync | cycle 0 (per line) | cycle 0 (per line) | -- |
+A delayed caller may skip a frame; this routine is synchronization, not elapsed
+frame accounting. When OS VBI runs, use changes to `RTCLOK+2 ($14)` instead.
+For an exact line, convert the target line to VCOUNT units and allow for its
+2-line resolution. WSYNC provides horizontal synchronization, releasing the
+CPU near the end of a scanline (cycle 105); it does not wait an entire frame.
 
-Notes:
-- VCOUNT is **not** reset by the RESET key; use a warm-flag in RAM to differentiate cold boot from warm restart see section 9.3.
-- On a hardware reset, VCOUNT holds an indeterminate value -- do not read it until frame 1.
-- `WSYNC` causes the CPU to stall until the NEXT horizontal sync. Cycle count variance depends on where the write lands within the current 114-cycle line.
+NMIST reads do not clear status. A write to `NMIRES ($D40F)` clears the status
+bits; ANTIC also changes DLI/VBI status as events occur. NMI is edge-triggered,
+so clearing status is distinct from acknowledging a level-triggered IRQ.
+
+Sources: [Altirra Hardware Reference Manual, 2026-01-02](https://www.virtualdub.org/downloads/Altirra%20Hardware%20Reference%20Manual.pdf),
+§§2.6, 4.8–4.10 and ANTIC register reference; [Atari XL OS Rev.2](https://github.com/ilmenit/A800-OS-XL-Rev2), NMI and DVNM.
 
 ---
 
-## 9.3 RESET-Resistant Programs
+## 9.3 System Reset and Power-On
 
-On 400/800 hardware, RESET is an NMI event; RAM is fully preserved.
-On XL/XE hardware, the RESET button triggers a hardware CPU RESET to `$FFFC`; RAM is indeterminate after power-on.
+System Reset is not the same as removing power. On 400/800 it triggers ANTIC
+RNMI, synchronized to vertical blank, and the fixed OS handles warm start.
+On XL/XE it asserts the hardware reset path; OS ROM is normally re-enabled
+by the reset PIA state. DRAM contents generally survive a button reset, while
+power-on contents must be treated as undefined.
 
-| Machine | Reset mechanism | RAM state | Survival trick |
-|---------|----------------|-----------|----------------|
-| 400/800 | /RNMI signals NMI -- `$FED6` warm-start | Preserved | Set warm flag in ZP; patch VDSLST to jump to main loop |
-| XL/XE | Hardware RESET -- CPU vector `$FFFC` | Undefined (power-on) | Detect cold boot; re-load from disk/cart or recover from warm-flag in TMPVEC RAM |
+Do not patch VDSLST as a reset hook: it is the DLI vector. Do not infer a cold
+boot solely from an arbitrary RAM byte being zero. A resident program needs
+a documented OS/DOS re-entry hook, a validated signature and state layout,
+and an explicit decision about what startup code may overwrite. If survival
+is not required, use the normal OS restart behavior.
 
-```asm
-; Cold boot detection on XL/XE
-cold_boot_detect
-        lda warm_flag
-        beq cold_boot_entry    ; flag not set -> power-on RESET
-        ; warm restart: restore display list
-        ldx #<saved_dll
-        lda #>saved_dll
-        stx SDLSTL
-        sta SDLSTH
-        jmp main_loop
-
-cold_boot_entry
-        jsr reload_from_disk
-        rts
-
-warm_flag    .byte   0           ; set this in RAM before any unexpected RESET
-saved_dll    .byte   0,0          ; saved SDLSTL/SDLSTH pointer
-```
-
-The `/RNMI` ROM shortcut on 400/800 hardware resumes execution directly in the warm-start stub; no reload from disk is needed.
+Sources: [Altirra Hardware Reference Manual](https://www.virtualdub.org/downloads/Altirra%20Hardware%20Reference%20Manual.pdf),
+§2.4 and System Reset NMI; [Atari XL OS Rev.2](https://github.com/ilmenit/A800-OS-XL-Rev2), warm/cold-start paths.
 
 ---
 
@@ -149,7 +117,9 @@ The `/RNMI` ROM shortcut on 400/800 hardware resumes execution directly in the w
 
 ### SDX detection via the DOSVEC protocol
 
-DOSVEC at `$000A` points at the standard DOS entry point. Its third byte (`+3`) is a JMP opcode (`$4C`) pointing to the parameter reader.
+DOSVEC at `$000A` points at the DOS entry. Some DOS families expose a
+command table with a JMP at offset +3. This recognizes that protocol shape,
+not SpartaDOS X uniquely; do not use it as an SDX-specific API guarantee.
 
 ```asm
 boot_?  = $09
@@ -166,7 +136,7 @@ detect_sdx
         lda (dosvec),y
         cmp #$4c              ; JMP opcode?
         bne _no_dos
-        clc                   ; CLI + SDX present
+        clc                   ; DOS command-table shape found (not proof of SDX)
         rts
 _no_dos sec
         rts
@@ -181,62 +151,19 @@ SDX extends the standard DOS XL protocol with its own richer parameter-parsing l
 | `AUTOEXEC.BAT` | Executed automatically at SDX boot |
 | `RUN.BAT` | Executed after `AUTOEXEC.BAT` |
 | Program `sa` loader | Calls SDX library `UPDATE NEW`, `UPDATE SYMBOL`, `BLK UPDATE EXTRN` for resolver |
-### SDX cross-process save and load
+### DOS memory ownership
 
-SDX provides a shared save area accessible from any process by standard CRT
-mechanism. The programmer stores data in a contiguous RAM block topped by a header
-byte and optionally terminated by a session identifier. Session identifiers permit
-multiple concurrent processes to keep independent save slots active without collision:
+A process cannot treat an arbitrary `$7000–$7FFF` range or a fixed `$6E00`
+pointer as a shared-memory API. Use the allocator and documented interfaces
+of the target DOS version. RAM data is not persistent across power cycles;
+explicitly save/load a file if persistence is required.
 
-```
-; --- store session data ---
-save_session
-    lda session_id        ; 1 byte session tag
-    sta save_hdr+0
-    lda #<save_data
-    sta save_hdr+1
-    lda #>save_data
-    sta save_hdr+2
-    ; header written, data available in RAM block $7000–$7FFF
-
-; --- retrieve session data ---
-load_session
-    lda save_hdr+0
-    cmp session_id
-    bne no_session         ; session tag mismatch — data absent
-    lda save_hdr+1
-    sta ptr_lo
-    lda save_hdr+2
-    sta ptr_hi
-    ; ptr now points to session data in shared RAM
-
-no_session
-    ...
-```
-
-Shared save blocks are not persistent — data lives only in RAM unless the caller
-explicitly invokes `SAVE 0, filename` to write the block to disk. For persistence
-across a session boundary: call `SAVE` before the process exits and `LOAD` on
-next invocation. The save area should be kept outside of BASIC's zero-page workspace
-and outside of the OS page-2 stack to prevent silent corruption by the `D`x
-iovector.
-
-SDX session save areas should be aligned to 256-byte boundaries to prevent page
-transition cache breaks in the process loader.
-
-The `INIT` preamble resets a session pointer held at `$6E00` used by the library.
-
-| SDX binary EXE header | `$FFFA` = start, `$FFFE` = end, `$FFFC` = INI block, `$FFFB` = symbol block |
-| `PUBLIC`/`EXT` MADS symbols | Emitted by MADS assembly, reloaded by `BLK UPDATE` chain |
-
-Key equivalences:
-- SDX formal parameter: `DT_xxx` types for `DCB` fields; workflow-type parameters passed as `DCB` command structures.
-- MADS `SAVE`/`RUN` blocks; generated from `.BYTE`/`.WORD`/`.LONG`/`.SAV`/`.SAV offset,length`.
-- `BLK UPDATE EXTRN` mirroring all `PUBLIC`/`.EXT` symbol entries from assembly.
+See [SpartaDOS X relocatable formats](storage/spartadosx.md) for loader blocks.
+Do not confuse assembler SAVE directives, DOS commands, and runtime APIs.
 
 ## 9.5 BREAK-Key Abort in Long Operations
 
-Atari OS records BREAK-key activity through `IRQSTAT ($0011)`. In ordinary OS
+Atari OS records BREAK-key activity through `BRKKEY ($0011)`. In ordinary OS
 operation this byte is normally `$FF`; when BREAK is pressed, the OS clears it.
 Long-running routines that do not call CIO often need to poll it explicitly.
 
@@ -244,13 +171,13 @@ Use this pattern in code that should be abortable without waiting for disk or
 console I/O:
 
 ```asm
-IRQSTAT = $11
+BRKKEY = $11
 
 check_break
-        lda IRQSTAT
+        lda BRKKEY
         beq ?break
         rts
-?break  dec IRQSTAT            ; restore to $FF after detecting BREAK
+?break  dec BRKKEY            ; restore to $FF after detecting BREAK
         lda #$80               ; BREAK KEY ABORT-style error code
         ; jump to caller's error path or SDX U_FAIL equivalent
         rts
@@ -262,6 +189,6 @@ the routine finishes. Keep the handler nesting shallow; SDX has a finite
 internal handler stack. If no custom handler is installed, an abort should
 fall through to the previous handler or system error path.
 
-Reset `IRQSTAT` after detecting BREAK. Console routines can also check this
+Reset `BRKKEY` after detecting BREAK. Console routines can also check this
 byte and may raise an unexpected BREAK error later if stale state is left
 behind.
