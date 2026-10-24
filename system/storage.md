@@ -253,7 +253,7 @@ boot_hdr
         mwa #main_start $0304   ; DBUF
         mwa #main_sector $030a  ; DAUX sector number
 
-load    jsr $e453               ; SIOV
+load    jsr $e453               ; DSKINV — OS disk handler (SIOV is $E459)
         bmi error
         adw $0304 #$80          ; next 128-byte buffer
         inw $030a               ; next sector
@@ -265,6 +265,11 @@ error   jmp $e477               ; OS SIO error handling path
 Use this only for ATR/boot-disk workflows. DOS file APIs are not active yet,
 and the first three boot sectors are normally 128 bytes even on
 enhanced-density disks.
+
+This example uses `DSKINV`, which supplies the standard disk DCB fields.
+A direct `SIOV ($E459)` call instead requires the caller to initialize the
+complete DCB, including `DDEVIC`, transfer direction, timeout, and byte count.
+See [cc65's Atari OS vector definitions](https://github.com/cc65/cc65/blob/master/asminc/atari.inc).
 
 Dual-address loader stub:
 

@@ -41,7 +41,7 @@ boot_hdr
         mwa #main_start $0304   ; DBUF
         mwa #main_sector $030a  ; DAUX sector number
 
-load    jsr $e453               ; SIOV
+load    jsr $e453               ; DSKINV — OS disk handler (SIOV is $E459)
         bmi error
         adw $0304 #$80          ; next 128-byte buffer
         inw $030a               ; next sector
@@ -51,6 +51,10 @@ error   jmp $e477               ; OS SIO error handling path
 ```
 
 Use this only for ATR/boot-disk workflows. DOS file APIs are not active yet, and the first three boot sectors are normally 128 bytes even on enhanced-density disks.
+
+`DSKINV` supplies the standard disk DCB fields. A direct `SIOV ($E459)` call
+requires the complete DCB, including device ID, transfer direction, timeout,
+and byte count; changing only the call address is insufficient.
 
 Dual-address loader stub, from the MADS example usually named `file_loader.asm`:
 

@@ -102,17 +102,28 @@ CIO channels on XL/XE run through IOCB table at `$0340` (IOCB0 starts at `$0340`
 
 ## 8.3 Key Scancodes
 
-The Atari keyboard matrix produces scancodes at `$D209` (KBCODE register), key modifiers at bit-mapped registers `$D01C` (SHIFT `$D209`). The OS maps scancodes to ATASCII in `GET` — raw scancodes are only needed when bypassing CIO:
+The Atari keyboard matrix produces scan codes at `KBCODE ($D209)`. Bits 0–5
+are the base code; bits 6 and 7 latch Shift and Control with the keypress.
+`SKSTAT ($D20F)` bit 2 is active-low key-down status, and bit 3 is active-low
+live Shift status. `$D01C` is GTIA's `VDELAY`, unrelated to keyboard modifiers.
+The OS translates scan codes to ATASCII through CIO `GET` from `K:`.
 
 ```asm
-        ; Raw key-code decode (no CIO)
-        ldx KBCODE              ; $D209 — raw scan code
-        cpx #$FF                ; no key?
-        beq @no_key
-        txa
+        ; Raw held-key decode (no CIO); SKCTL=$03 already configured
+        lda SKSTAT             ; $D20F — keyboard/serial status
+        and #$04               ; bit 2 is clear while a key is held
+        bne @no_key
+        lda KBCODE             ; $D209 — last latched scan code
         and #$3F                ; strip shift flags
         ; now A = base scancode 0-63; translate via table
+        ; ... process key here ...
+@no_key
 ```
+
+`KBCODE` retains its value after release. Do not use `$FF` as a no-key test:
+Shift+Control+A can produce `$FF`. See [keyboard input](input.md#63-keyboard-input)
+for the complete matrix, OS `CH` polling, and a hardware polling routine.
+Reference: [Altirra Hardware Reference Manual](https://www.virtualdub.org/downloads/Altirra%20Hardware%20Reference%20Manual.pdf), §5.8.
 
 ---
 

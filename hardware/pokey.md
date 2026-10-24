@@ -56,20 +56,27 @@ Only low 4 address bits are decoded, so the canonical registers at `$D200-$D20F`
 
 ```
 AUDCTL bits:
-  bit 6 = timer 1/2 clock: 0 = 64 kHz  /  1 = 15 kHz
-  bit 5 = timer 3/4 clock: 0 = 64 kHz  /  1 = 15 kHz
+  bit 7 = polynomial   : 0 = 17-bit  /  1 = 9-bit
+  bit 6 = timer 1 clock: 0 = base clock  /  1 = CPU clock (~1.79 MHz)
+  bit 5 = timer 3 clock: 0 = base clock  /  1 = CPU clock (~1.79 MHz)
   bit 4 = link T1→T2     : 0 = independent  1 = T2 clocked by T1
   bit 3 = link T3→T4     : 0 = independent  1 = T4 clocked by T3
-  bit 2 = speaker mode   : 0 = two-tone  1 = high-pass-filter
-  bit 1 = channel count  : 0 = 16-bit (T1+T2)  1 = 4-bit
-  bit 0 = T1 clock source: 0 = 64 kHz  1 = 15 kHz
+  bit 2 = high-pass CH1: 0 = off  /  1 = filter CH1 using timer 3
+  bit 1 = high-pass CH2: 0 = off  /  1 = filter CH2 using timer 4
+  bit 0 = base clock  : 0 = 64 kHz  /  1 = 15 kHz
 ```
 
 | Clock source | Period for timer (AUDF=N) | Notes |
 |---|---|---|
-| 1.79 MHz (USER1/3) | `N+4` cycles | Fastest — highest precision |
-| 15 kHz | `(N+1) × 114`CPU cycles | ~837 Hz at N=0 |
-| 64 kHz | `(N+1) × 28` CPU cycles (~1750 Hz) | Good for short musical notes |
+| CPU clock (AUDCTL bit 6 for T1, bit 5 for T3) | `N+4` CPU cycles | ~1.78977 MHz NTSC / ~1.77345 MHz PAL |
+| 15 kHz | `(N+1) × 114` CPU cycles | Base clock shared by all timers that use it |
+| 64 kHz | `(N+1) × 28` CPU cycles | Base clock shared by all timers that use it |
+
+These are unlinked timer periods. A pure square wave takes two timer periods
+per output cycle. For example, `$50` joins 1+2 with T1 at the CPU clock,
+`$28` does the same for 3+4, and `$78` enables both pairs.
+
+Reference: [Altirra Hardware Reference Manual](https://www.virtualdub.org/downloads/Altirra%20Hardware%20Reference%20Manual.pdf), §§5.3 and 14.4 (AUDCTL).
 
 **Linked timers:** AUDF1 + AUDF2 form a 16-bit period; T2 counts from AUDF2, then wraps up to $FF on each T1 underflow before both reset together.
 

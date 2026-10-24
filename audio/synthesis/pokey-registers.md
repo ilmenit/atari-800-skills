@@ -63,12 +63,12 @@ Bit 4 = 1 selects forced-DC output: the polynomial counter and frequency divider
 |-----|-----|----------|
 | 7 | $80 | 9-bit polynomial count (default 17-bit). Only heard on noise modes; pure-tone modes ignore this bit. |
 | 6 | $40 | Channel 1 runs from the CPU clock instead of the 63.921 kHz base. Used for 16-bit high-precision and PDM sub-sample rates. |
-| 5 | $20 | Channel 3 runs from the CPU clock (1.789 77 MHz). Paired with bit 4 for 16-bit CH3+CH4 timing. |
+| 5 | $20 | Channel 3 runs from the CPU clock (~1.78977 MHz NTSC / ~1.77345 MHz PAL). Paired with bit 3 for 16-bit CH3+CH4 timing. |
 | 4 | $10 | Join channels 1+2; CH1 becomes LSB, CH2 MSB. Single 16-bit divider: 65 536 steps. |
 | 3 | $08 | Join channels 3+4; CH3 LSB, CH4 MSB. Independent of the CH1+CH2 pair. |
 | 2 | $04 | High-pass filter: CH1 output sampled during CH3 divider ticks, gated through XOR. |
 | 1 | $02 | High-pass filter: CH2 output sampled during CH4 divider ticks. |
-| 0 | $01 | Downscale base clock to 15.700 kHz. Lowers every pitch by four octaves; useful for sub-bass drones. |
+| 0 | $01 | Select the 15 kHz base clock instead of 64 kHz (~15.700 kHz NTSC / ~15.557 kHz PAL). Affects channels using the base clock; lowers their pitch by about two octaves. |
 
 Bits 5 and 6 affect different channels — documentation frequently transposes them. Bit 5 = channel 3 tick source; bit 6 = channel 1 tick source.
 
